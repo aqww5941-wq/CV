@@ -34,11 +34,23 @@ CAMERA_INDEX = 0
 FRAME_WIDTH = 1280
 FRAME_HEIGHT = 720
 
+# 检测间隔 (帧): 每 N 帧做一次完整检测, 其余帧走跟踪缓存
+# 30 FPS 下 DETECT_INTERVAL=15 约每秒检测 2 次, CPU 降低 80%+
+DETECT_INTERVAL = 15
+
 # 检测置信度阈值
 DETECTION_THRESHOLD = 0.5
 
+# ── MySQL 数据库连接配置 ──
+MYSQL_HOST = "localhost"
+MYSQL_PORT = 3306
+MYSQL_USER = "root"
+MYSQL_PASSWORD = "123456"
+MYSQL_DATABASE = "attendance"
+MYSQL_CHARSET = "utf8mb4"
+
 # UI 颜色 (BGR)
-COLOR_RECOGNIZED = (0, 255, 0)    # 绿色: 识别成功
-COLOR_STRANGER = (0, 0, 255)      # 红色: 陌生人
-COLOR_WELCOME = (255, 255, 0)     # 青色: 欢迎文字
-COLOR_BOX = (0, 255, 0)           # 人脸框颜色
+COLOR_RECOGNIZED = (0, 255, 0)  # 绿色: 识别成功
+COLOR_STRANGER = (0, 0, 255)  # 红色: 陌生人
+COLOR_WELCOME = (255, 255, 0)  # 青色: 欢迎文字
+COLOR_BOX = (0, 255, 0)  # 人脸框颜色
