@@ -25,7 +25,7 @@ from core.face_db import FaceDatabase
 from core.recognizer import FaceRecognizer
 from core.recognition_cache import RecognitionCache
 from core.redis_checkin import RedisCheckIn
-from core.sound import play_welcome
+from core.sound import play_welcome, play_goodbye
 from core.tracker import FaceTracker
 from core.vector_db import VectorDB
 from core.vote import VoteBuffer
@@ -290,6 +290,7 @@ def _run_gui_loop(
                     duration = attendance_db.check_out(last_recognized_name)
                     checkin_tracker.reset_checkin(last_recognized_name)
                     event_bus.checkout(last_recognized_name, 0, duration)
+                    play_goodbye()
                     toast_text = (
                         f"【签退】{last_recognized_name} 成功，今日工作 {duration} 分钟"
                     )
