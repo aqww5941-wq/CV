@@ -1,6 +1,9 @@
 opencv-python>=4.8.0
 insightface>=0.7.3
 numpy>=1.24.0
-onnxruntime>=1.14.0
+onnxruntime-gpu>=1.14.0
 Pillow>=10.0.0
 pymysql>=1.1.0
+psycopg2-binary>=2.9.0
+pgvector>=0.3.0
+redis>=5.0.0

@@ -15,14 +15,27 @@ CACHE_FILE = os.path.join(CACHE_DIR, "face_db.pkl")
 # InsightFace 模型名称 (buffalo_l 精度高, buffalo_sc 速度快)
 INSIGHTFACE_MODEL = "buffalo_l"
 
+# GPU 加速: True 使用 CUDA, False 使用 CPU
+USE_GPU = False
+
+# ONNX Runtime 执行提供器 (根据 USE_GPU 自动选择)
+INSIGHTFACE_PROVIDERS = (
+    ["CUDAExecutionProvider", "CPUExecutionProvider"]
+    if USE_GPU
+    else ["CPUExecutionProvider"]
+)
+
 # 人脸匹配阈值 (cosine similarity, 0~1, 越高越严格)
 MATCH_THRESHOLD = 0.6
 
 # 防抖时间 (秒): 同一个人在此时间内只欢迎一次
 DEBOUNCE_SECONDS = 5
 
+# 签到冷却时间 (秒): 同一个人签到后, 此时间内不再签到
+CHECKIN_COOLDOWN_SECONDS = 600
+
 # 是否启用摄像头实时画面（暂时关闭设为 False）
-ENABLE_CAMERA = False
+ENABLE_CAMERA = True
 
 # 测试模式: True = 允许重复打卡 (关闭每日去重和防抖)
 ALLOW_REPEAT_CHECKIN = False
@@ -45,7 +58,7 @@ DETECTION_THRESHOLD = 0.5
 VOTE_WINDOW = 5  # 滑动窗口大小
 VOTE_MIN_VOTES = 3  # 获胜者至少需要 N 票
 
-# ── MySQL 数据库连接配置 ──
+# ── MySQL 数据库连接配置 (业务数据: 考勤记录) ──
 MYSQL_HOST = "127.0.0.1"
 MYSQL_PORT = 3306
 MYSQL_USER = "root"
@@ -53,8 +66,19 @@ MYSQL_PASSWORD = "123456"
 MYSQL_DATABASE = "attendance"
 MYSQL_CHARSET = "utf8mb4"
 
-# UI 颜色 (BGR)
-COLOR_RECOGNIZED = (0, 255, 0)  # 绿色: 识别成功
-COLOR_STRANGER = (0, 0, 255)  # 红色: 陌生人
-COLOR_WELCOME = (255, 255, 0)  # 青色: 欢迎文字
-COLOR_BOX = (0, 255, 0)  # 人脸框颜色
+# ── PostgreSQL + pgvector 连接配置 (向量数据: 人脸特征) ──
+PG_HOST = "127.0.0.1"
+PG_PORT = 5434
+PG_USER = "postgres"
+PG_PASSWORD = "123456"
+PG_DATABASE = "face_db"
+
+# ── Redis 连接配置 (签到去重) ──
+REDIS_HOST = "127.0.0.1"
+REDIS_PORT = 6379
+REDIS_PASSWORD = ""
+REDIS_DB = 0
+
+# ── 消息队列配置 (事件发布) ──
+MQ_BACKEND = "redis"  # "redis" | "kafka" | "rabbitmq"
+MQ_TOPIC_PREFIX = "attendance"
