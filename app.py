@@ -25,7 +25,7 @@ from core.face_db import FaceDatabase
 from core.recognizer import FaceRecognizer
 from core.recognition_cache import RecognitionCache
 from core.redis_checkin import RedisCheckIn
-from core.sound import play_welcome, play_goodbye
+from core.sound import play_welcome, play_goodbye, generate_edge_wavs
 from core.tracker import FaceTracker
 from core.vector_db import VectorDB
 from core.vote import VoteBuffer
@@ -444,6 +444,9 @@ def main():
 
     recognizer = FaceRecognizer()
     recognizer.init_model()
+
+    logger.info("正在生成 Edge TTS 语音 (首次较慢, 后续使用缓存)...")
+    generate_edge_wavs()
 
     tracker = FaceTracker(detect_interval=DETECT_INTERVAL)
 

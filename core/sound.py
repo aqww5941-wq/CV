@@ -1,17 +1,52 @@
-"""语音播报模块: 打卡成功时播放"欢迎光临"语音。预生成 WAV 实现毫秒级响应。"""
+"""语音播报模块: Edge TTS 预生成 WAV → 毫秒级播放。降级: PowerShell → ESpeak。"""
 
+import asyncio
 import logging
 import os
 import subprocess
-import sys
 import threading
 
 from config import CACHE_DIR
 
 logger = logging.getLogger(__name__)
 
-_WAV_PATH = os.path.join(CACHE_DIR, "welcome.wav")
-_GOODBYE_WAV_PATH = os.path.join(CACHE_DIR, "goodbye.wav")
+_WELCOME_WAV = os.path.join(CACHE_DIR, "welcome.mp3")
+_GOODBYE_WAV = os.path.join(CACHE_DIR, "goodbye.mp3")
+
+VOICE = "zh-CN-XiaoxiaoNeural"
+WELCOME_TEXT = "欢迎光临"
+GOODBYE_TEXT = "明天见"
+
+
+def generate_edge_wavs() -> None:
+    """启动时调用: 用 Edge TTS 预生成语音, 缓存命中跳过"""
+    _generate_cached(WELCOME_TEXT, _WELCOME_WAV)
+    _generate_cached(GOODBYE_TEXT, _GOODBYE_WAV)
+
+
+def _generate_cached(text: str, path: str) -> None:
+    if os.path.exists(path) and os.path.getsize(path) > 0:
+        logger.debug("TTS 缓存命中: %s", path)
+        return
+    _generate_wav(text, path)
+
+
+def _generate_wav(text: str, path: str) -> None:
+    try:
+        asyncio.run(_generate_edge_tts(text, path))
+    except Exception as e:
+        logger.debug("Edge TTS 生成失败 (%s): %s", text, e)
+
+
+async def _generate_edge_tts(text: str, path: str) -> None:
+    import edge_tts
+
+    communicate = edge_tts.Communicate(text, VOICE)
+    with open(path, "wb") as f:
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                f.write(chunk["data"])
+    logger.info("Edge TTS 生成: %s → %s", text, path)
 
 
 def play_welcome() -> None:
@@ -20,57 +55,21 @@ def play_welcome() -> None:
 
 
 def _play_welcome() -> None:
-    if os.path.exists(_WAV_PATH):
+    if os.path.exists(_WELCOME_WAV) and os.path.getsize(_WELCOME_WAV) > 0:
         try:
-            _play_wav()
+            _play_wav(_WELCOME_WAV)
             return
         except Exception as e:
             logger.debug("WAV 播放失败: %s", e)
 
-    for backend in (_play_espeak, _play_powershell):
+    for backend in (_play_text_espeak, _play_text_powershell):
         try:
-            backend()
+            backend(WELCOME_TEXT)
             return
         except Exception:
             pass
 
     logger.warning("无可用语音后端, 跳过语音播报")
-
-
-def _play_wav() -> None:
-    if sys.platform == "win32":
-        import winsound
-
-        winsound.PlaySound(_WAV_PATH, winsound.SND_FILENAME | winsound.SND_ASYNC)
-    else:
-        subprocess.run(
-            ["aplay", "-q", _WAV_PATH],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=3,
-        )
-
-
-def _play_espeak() -> None:
-    subprocess.run(
-        ["espeak", "-v", "zh", "欢迎光临"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        timeout=5,
-    )
-
-
-def _play_powershell() -> None:
-    subprocess.run(
-        [
-            "powershell",
-            "-Command",
-            '(New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak("欢迎光临")',
-        ],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        timeout=10,
-    )
 
 
 def play_goodbye() -> None:
@@ -79,16 +78,16 @@ def play_goodbye() -> None:
 
 
 def _play_goodbye() -> None:
-    if os.path.exists(_GOODBYE_WAV_PATH):
+    if os.path.exists(_GOODBYE_WAV) and os.path.getsize(_GOODBYE_WAV) > 0:
         try:
-            _play_goodbye_wav()
+            _play_wav(_GOODBYE_WAV)
             return
         except Exception as e:
             logger.debug("WAV 播放失败: %s", e)
 
-    for backend in (_play_goodbye_espeak, _play_goodbye_powershell):
+    for backend in (_play_text_espeak, _play_text_powershell):
         try:
-            backend()
+            backend(GOODBYE_TEXT)
             return
         except Exception:
             pass
@@ -96,37 +95,29 @@ def _play_goodbye() -> None:
     logger.warning("无可用语音后端, 跳过签退语音")
 
 
-def _play_goodbye_wav() -> None:
-    if sys.platform == "win32":
-        import winsound
+def _play_wav(path: str) -> None:
+    import pygame.mixer
 
-        winsound.PlaySound(
-            _GOODBYE_WAV_PATH, winsound.SND_FILENAME | winsound.SND_ASYNC
-        )
-    else:
-        subprocess.run(
-            ["aplay", "-q", _GOODBYE_WAV_PATH],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=3,
-        )
+    pygame.mixer.init()
+    pygame.mixer.music.load(path)
+    pygame.mixer.music.play()
 
 
-def _play_goodbye_espeak() -> None:
+def _play_text_espeak(text: str) -> None:
     subprocess.run(
-        ["espeak", "-v", "zh", "明天见"],
+        ["espeak", "-v", "zh", text],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         timeout=5,
     )
 
 
-def _play_goodbye_powershell() -> None:
+def _play_text_powershell(text: str) -> None:
     subprocess.run(
         [
             "powershell",
             "-Command",
-            '(New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak("明天见")',
+            f'(New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak("{text}")',
         ],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
