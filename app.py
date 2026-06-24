@@ -21,10 +21,11 @@ from config import (
     ENABLE_CAMERA,
     ALLOW_REPEAT_CHECKIN,
     DETECT_INTERVAL,
+    VOTE_WINDOW,
 )
 from attendance_db import AttendanceDB
 from face_db import FaceDatabase
-from face_recognition import CheckInTracker, FaceRecognizer, FaceTracker
+from face_recognition import CheckInTracker, FaceRecognizer, FaceTracker, VoteBuffer
 from sound import play_welcome
 
 logging.basicConfig(
@@ -237,12 +238,21 @@ def draw_texts_on_frame(frame: np.ndarray, draw_calls: list[dict]) -> np.ndarray
 
 
 def _run_headless_loop(
-    cap, face_db, db_embeddings, recognizer, tracker, attendance_db, checkin_tracker
+    cap,
+    face_db,
+    db_embeddings,
+    recognizer,
+    tracker,
+    attendance_db,
+    checkin_tracker,
+    vote_buffer,
 ):
     """无 GUI 模式：摄像头静默运行，控制台输出打卡事件，Ctrl+C 退出"""
     logger.info(
-        "无界面模式启动 (ENABLE_CAMERA=False)，检测间隔=%d 帧，摄像头静默运行中...",
+        "无界面模式启动 (ENABLE_CAMERA=False)，检测间隔=%d 帧，投票窗口=%d/%d 票，摄像头静默运行中...",
         DETECT_INTERVAL,
+        VOTE_WINDOW,
+        VOTE_WINDOW,
     )
     logger.info("按 Ctrl+C 退出")
     fps_start = time.time()
@@ -256,28 +266,36 @@ def _run_headless_loop(
 
             frame = cv2.flip(frame, 1)
             faces = tracker.update(frame, recognizer)
+            active_ids = {face["track_id"] for face in faces}
+            vote_buffer.cleanup_inactive(active_ids)
 
             for face in faces:
                 embedding = face["embedding"]
+                track_id = face["track_id"]
                 name, similarity = recognizer.match(embedding, db_embeddings)
 
-                if name is None:
-                    if recognizer.should_log_stranger():
+                voted_name = vote_buffer.vote(track_id, name, similarity, time.time())
+
+                if voted_name is None:
+                    if name is None and recognizer.should_log_stranger():
                         logger.info("检测到未知访客")
                     continue
 
                 if not ALLOW_REPEAT_CHECKIN:
-                    if checkin_tracker.is_checked_out_today(name):
+                    if checkin_tracker.is_checked_out_today(voted_name):
                         continue
-                    if checkin_tracker.is_checked_in_today(name):
+                    if checkin_tracker.is_checked_in_today(voted_name):
                         continue
 
-                if ALLOW_REPEAT_CHECKIN or recognizer.should_welcome(name):
-                    row_id = attendance_db.check_in(name)
-                    checkin_tracker.mark_checked_in(name)
+                if ALLOW_REPEAT_CHECKIN or recognizer.should_welcome(voted_name):
+                    row_id = attendance_db.check_in(voted_name)
+                    checkin_tracker.mark_checked_in(voted_name)
                     play_welcome()
                     logger.info(
-                        "签到成功: %s (sim=%.3f, row=%s)", name, similarity, row_id
+                        "签到成功: %s (sim=%.3f, row=%s)",
+                        voted_name,
+                        similarity,
+                        row_id,
                     )
 
             fps_frames += 1
@@ -298,7 +316,14 @@ def _run_headless_loop(
 
 
 def _run_gui_loop(
-    cap, face_db, db_embeddings, recognizer, tracker, attendance_db, checkin_tracker
+    cap,
+    face_db,
+    db_embeddings,
+    recognizer,
+    tracker,
+    attendance_db,
+    checkin_tracker,
+    vote_buffer,
 ):
     """GUI 模式：摄像头实时画面 + 科技感 UI 叠加层"""
     global button_clicked, last_recognized_name, last_recognized_bbox, button_rect
@@ -336,9 +361,13 @@ def _run_gui_loop(
             cv2.line(frame, (0, 55), (w, 55), COLOR_CYAN, 1, lineType=cv2.LINE_AA)
 
             # ── 2. 人脸检测与高科技框 ──
+            active_ids = {face["track_id"] for face in faces}
+            vote_buffer.cleanup_inactive(active_ids)
+
             for face in faces:
                 bbox = face["bbox"]
                 embedding = face["embedding"]
+                track_id = face["track_id"]
                 name, similarity = recognizer.match(embedding, db_embeddings)
                 recognized = name is not None
 
@@ -363,13 +392,19 @@ def _run_gui_loop(
                         label = f"已签到 · {name}"
                     else:
                         label = name
-                        if ALLOW_REPEAT_CHECKIN or recognizer.should_welcome(name):
-                            row_id = attendance_db.check_in(name)
-                            checkin_tracker.mark_checked_in(name)
+                        voted_name = vote_buffer.vote(
+                            track_id, name, similarity, time.time()
+                        )
+                        if voted_name is not None and (
+                            ALLOW_REPEAT_CHECKIN
+                            or recognizer.should_welcome(voted_name)
+                        ):
+                            row_id = attendance_db.check_in(voted_name)
+                            checkin_tracker.mark_checked_in(voted_name)
                             play_welcome()
-                            welcome_text = f"欢迎回来, {name}! 签到成功"
+                            welcome_text = f"欢迎回来, {voted_name}! 签到成功"
                             welcome_until = time.time() + 3.0
-                            label = f"已签到 · {name}"
+                            label = f"已签到 · {voted_name}"
                 else:
                     label = "未知访客"
 
@@ -558,6 +593,7 @@ def main():
     attendance_db = AttendanceDB()
     checkin_tracker = CheckInTracker()
     checkin_tracker.cleanup()
+    vote_buffer = VoteBuffer()
 
     cap = cv2.VideoCapture(CAMERA_INDEX)
     if not cap.isOpened():
@@ -575,6 +611,7 @@ def main():
             tracker,
             attendance_db,
             checkin_tracker,
+            vote_buffer,
         )
     else:
         _run_headless_loop(
@@ -585,6 +622,7 @@ def main():
             tracker,
             attendance_db,
             checkin_tracker,
+            vote_buffer,
         )
 
 

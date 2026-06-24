@@ -41,8 +41,12 @@ DETECT_INTERVAL = 15
 # 检测置信度阈值
 DETECTION_THRESHOLD = 0.5
 
+# 多帧投票: 连续 N 帧识别结果投票, 避免单帧误识别 (眨眼/侧脸/模糊/运动)
+VOTE_WINDOW = 5  # 滑动窗口大小
+VOTE_MIN_VOTES = 3  # 获胜者至少需要 N 票
+
 # ── MySQL 数据库连接配置 ──
-MYSQL_HOST = "localhost"
+MYSQL_HOST = "127.0.0.1"
 MYSQL_PORT = 3306
 MYSQL_USER = "root"
 MYSQL_PASSWORD = "123456"

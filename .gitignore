@@ -1,11 +1,11 @@
 .venv/
 __pycache__/
-cache/              # 所有运行时缓存：face_db.pkl、attendance.db、checkins.json、welcome.wav
-employees/          # 员工照片
-*.py[cod]           # .pyc .pyo .pyd 编译字节码
-*.egg-info/         # Python 包构建信息
+cache/              
+employees/         
+*.py[cod]          
+*.egg-info/         
 *.egg
 build/
 dist/
-*.log               # 日志文件
+*.log              
 logs/

@@ -4,7 +4,7 @@ import json
 import logging
 import os
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from datetime import date
 
 import numpy as np
@@ -18,6 +18,8 @@ from config import (
     MATCH_THRESHOLD,
     DEBOUNCE_SECONDS,
     DETECT_INTERVAL,
+    VOTE_WINDOW,
+    VOTE_MIN_VOTES,
 )
 
 logger = logging.getLogger(__name__)
@@ -320,3 +322,71 @@ class FaceTracker:
         union_area = area_a + area_b - inter_area
 
         return inter_area / union_area if union_area > 0 else 0.0
+
+
+class VoteBuffer:
+    """多帧投票: 连续 N 帧识别结果投票, 避免单帧误识别 (眨眼/侧脸/模糊/运动)。
+
+    用法:
+        buf = VoteBuffer(window=5, min_votes=3)
+        voted_name = buf.vote(track_id, name, similarity, time.time())
+        if voted_name is not None:
+            check_in(voted_name)  # 只有投票确认后才触发签到
+    """
+
+    def __init__(
+        self,
+        window: int = VOTE_WINDOW,
+        min_votes: int = VOTE_MIN_VOTES,
+        cooldown: float = 5.0,
+    ):
+        self._window = window
+        self._min_votes = min_votes
+        self._cooldown = cooldown
+        self._buffers: dict[int, deque[tuple[str, float]]] = defaultdict(
+            lambda: deque(maxlen=window)
+        )
+        self._confirmed: dict[int, tuple[str, float]] = {}
+
+    def vote(
+        self, track_id: int, name: str | None, similarity: float, now: float
+    ) -> str | None:
+        """喂入一帧识别结果, 返回投票确认的人名或 None。
+
+        - 冷却期: 确认后 cooldown 秒内不再触发, 防止连续签到
+        - 窗口未满: 返回 None, 等待更多帧
+        - 投票胜出: 返回票数最多的名字 (需 >= min_votes)
+        """
+        if track_id in self._confirmed:
+            confirmed_name, confirmed_time = self._confirmed[track_id]
+            if now - confirmed_time < self._cooldown:
+                return None
+
+        key = "__UNKNOWN__" if name is None else name
+        self._buffers[track_id].append((key, similarity))
+
+        buf = self._buffers[track_id]
+        if len(buf) < self._window:
+            return None
+
+        counts: dict[str, int] = defaultdict(int)
+        for n, _ in buf:
+            if n != "__UNKNOWN__":
+                counts[n] += 1
+
+        if not counts:
+            return None
+
+        winner = max(counts, key=counts.get)
+        if counts[winner] >= self._min_votes:
+            self._confirmed[track_id] = (winner, now)
+            return winner
+
+        return None
+
+    def cleanup_inactive(self, active_track_ids: set[int]) -> None:
+        """清理已离开画面的人脸轨迹缓冲区。"""
+        for tid in list(self._buffers.keys()):
+            if tid not in active_track_ids:
+                self._buffers.pop(tid, None)
+                self._confirmed.pop(tid, None)

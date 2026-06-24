@@ -19,8 +19,9 @@ logger = logging.getLogger(__name__)
 
 class AttendanceDB:
     def __init__(self):
-        self._ensure_database()
-        self._conn = self._create_conn(database=MYSQL_DATABASE)
+        self._conn = self._create_conn()
+        self._ensure_database(self._conn)
+        self._conn.select_db(MYSQL_DATABASE)
         self._init_table()
         logger.info("MySQL 连接成功: %s:%s/%s", MYSQL_HOST, MYSQL_PORT, MYSQL_DATABASE)
 
@@ -39,16 +40,14 @@ class AttendanceDB:
             kwargs["database"] = database
         return pymysql.connect(**kwargs)
 
-    def _ensure_database(self):
-        conn = self._create_conn()
+    def _ensure_database(self, conn):
         cur = conn.cursor()
         cur.execute(
-            "CREATE DATABASE IF NOT EXISTS %s"
+            "CREATE DATABASE IF NOT EXISTS `%s`"
             " DEFAULT CHARACTER SET utf8mb4"
             " DEFAULT COLLATE utf8mb4_unicode_ci" % MYSQL_DATABASE
         )
         cur.close()
-        conn.close()
 
     def _ensure_conn(self):
         """断线重连: 长时间运行的摄像头程序可能因 MySQL wait_timeout 断开连接。"""
