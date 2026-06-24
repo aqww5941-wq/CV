@@ -430,7 +430,10 @@ def main():
         if len(vector_db) > 0:
             pg_embeddings = vector_db.get_all_grouped()
             logger.info("pgvector 底库: %d 人", len(pg_embeddings))
-            db_embeddings = pg_embeddings
+            merged = dict(db_embeddings)
+            merged.update(pg_embeddings)
+            db_embeddings = list(merged.items())
+            logger.info("合并后底库: %d 人", len(db_embeddings))
         else:
             logger.info(
                 "pgvector 为空, 使用 pickle 缓存底库: %d 人", len(db_embeddings)

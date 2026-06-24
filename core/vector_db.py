@@ -142,8 +142,15 @@ class VectorDB:
         cur.close()
         result = []
         for name, emb in rows:
-            arr = np.array(emb, dtype=np.float32)
-            arr = arr / np.linalg.norm(arr)
+            if isinstance(emb, str):
+                arr = np.fromstring(emb.strip("[]"), sep=",", dtype=np.float32)
+            elif isinstance(emb, list):
+                arr = np.array(emb, dtype=np.float32)
+            else:
+                arr = np.array(emb, dtype=np.float32)
+            norm = np.linalg.norm(arr)
+            if norm > 0:
+                arr = arr / norm
             result.append((name, arr))
         return result
 
