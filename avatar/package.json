@@ -1,0 +1,12 @@
+{
+    "name": "cv-avatar",
+    "version": "1.0.0",
+    "description": "Live2D Epsilon avatar for CV system",
+    "private": true,
+    "dependencies": {
+        "express": "^4.21.0",
+        "ws": "^8.18.0",
+        "pixi.js": "^7.3.3",
+        "pixi-live2d-display": "^0.4.0"
+    }
+}
