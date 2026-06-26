@@ -1,13 +1,11 @@
 import asyncio
+import random
 import sys
-import os
 
-VOICE = "zh-CN-XiaoxiaoNeural"
-
-TEXTS = {
-    "welcome": "{}，欢迎光临！",
-    "goodbye": "{}，明天见！",
-}
+try:
+    from core.tts_texts import TTS_TEXTS, VOICE
+except ModuleNotFoundError:
+    from tts_texts import TTS_TEXTS, VOICE
 
 
 async def _generate(text: str, output_path: str) -> None:
@@ -24,8 +22,13 @@ if __name__ == "__main__":
     name = sys.argv[1]
     tts_type = sys.argv[2]
     output_path = sys.argv[3]
+    variant = int(sys.argv[4]) if len(sys.argv) > 4 else None
 
-    template = TEXTS.get(tts_type, "{}")
+    candidates = TTS_TEXTS.get(tts_type, ["{}"])
+    if variant is None:
+        template = random.choice(candidates)
+    else:
+        template = candidates[variant % len(candidates)]
     text = template.format(name)
 
     asyncio.run(_generate(text, output_path))

@@ -22,20 +22,23 @@ app.use(express.static(STATIC_DIR));
 
 app.get('/tts', (req, res) => {
     const name = req.query.name || '访客';
-    const type = req.query.type || 'welcome';
+    const type = req.query.type || 'check_in';
+    const variant = Number.isInteger(Number(req.query.variant))
+        ? Math.max(0, Number(req.query.variant))
+        : Math.floor(Math.random() * 6);
 
     if (!fs.existsSync(CACHE_DIR)) {
         fs.mkdirSync(CACHE_DIR, { recursive: true });
     }
 
-    const cacheFile = path.join(CACHE_DIR, `${name}_${type}.mp3`);
+    const cacheFile = path.join(CACHE_DIR, `${name}_${type}_${variant}.mp3`);
 
     if (fs.existsSync(cacheFile)) {
         return res.sendFile(cacheFile);
     }
 
     const ttsScript = path.join(__dirname, '..', 'core', 'tts_server.py');
-    const cmd = `python "${ttsScript}" "${name}" "${type}" "${cacheFile}"`;
+    const cmd = `python "${ttsScript}" "${name}" "${type}" "${cacheFile}" "${variant}"`;
 
     exec(cmd, { cwd: path.join(__dirname, '..') }, (err, stdout, stderr) => {
         if (err) {

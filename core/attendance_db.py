@@ -128,6 +128,28 @@ class AttendanceDB:
             for r in rows
         ]
 
+    def has_any_record(self, name: str) -> bool:
+        self._ensure_conn()
+        cur = self._conn.cursor()
+        cur.execute("SELECT 1 FROM attendance WHERE name=%s LIMIT 1", (name,))
+        result = cur.fetchone() is not None
+        cur.close()
+        return result
+
+    def has_record_today(self, name: str, before_now: bool = False) -> bool:
+        self._ensure_conn()
+        today = date.today().isoformat()
+        if before_now:
+            cur = self._conn.cursor()
+            cur.execute(
+                "SELECT 1 FROM attendance WHERE name=%s AND date<%s LIMIT 1",
+                (name, today),
+            )
+            result = cur.fetchone() is not None
+            cur.close()
+            return result
+        return bool(self.get_today_records(name))
+
     def register_employee(self, name: str) -> bool:
         self._ensure_conn()
         cur = self._conn.cursor()

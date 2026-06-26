@@ -34,8 +34,8 @@ DEBOUNCE_SECONDS = 5
 # 签到冷却时间 (秒): 同一个人签到后, 此时间内不再签到
 CHECKIN_COOLDOWN_SECONDS = 600
 
-# 是否启用摄像头实时画面（暂时关闭设为 False）
-ENABLE_CAMERA = True
+# 是否启用 OpenCV 实时预览窗口。False 时仍会读取摄像头并后台识别。
+ENABLE_GUI = True
 
 # 测试模式: True = 允许重复打卡 (关闭每日去重和防抖)
 ALLOW_REPEAT_CHECKIN = False
@@ -82,3 +82,12 @@ REDIS_DB = 0
 # ── 消息队列配置 (事件发布) ──
 MQ_BACKEND = "redis"  # "redis" | "kafka" | "rabbitmq"
 MQ_TOPIC_PREFIX = "attendance"
+
+# ── 数字人前端 ──
+AVATAR_SERVER_URL = "http://localhost:3456"
+
+# 长时间无人阈值 (秒): 超过此时间触发 idle_long 事件
+IDLE_LONG_THRESHOLD = 60
+
+# 多人同时出现阈值 (人脸数): 超过此数量触发 crowd 事件
+CROWD_THRESHOLD = 3

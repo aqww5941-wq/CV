@@ -6,3 +6,5 @@ alwaysApply: true
 
 
 ## 2. 项目是公司内部项目，不要想着快速粗略的搭建，碰到问题不要总想着降级
+
+## 3. pip安装命令最后都加上清华源头，例如：`pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple`

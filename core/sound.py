@@ -1,34 +1,34 @@
-"""语音播报模块: Edge TTS 预生成 WAV → 毫秒级播放。降级: PowerShell → ESpeak。"""
+"""语音播报模块: Edge TTS 预生成 mp3 → 毫秒级播放。降级: PowerShell → ESpeak。"""
 
 import asyncio
 import logging
 import os
+import random
 import subprocess
 import threading
 
 from config import CACHE_DIR
+from core.tts_texts import TTS_TEXTS, VOICE
 
 logger = logging.getLogger(__name__)
 
-_WELCOME_WAV = os.path.join(CACHE_DIR, "welcome.mp3")
-_GOODBYE_WAV = os.path.join(CACHE_DIR, "goodbye.mp3")
+_CACHE = {}
 
-VOICE = "zh-CN-XiaoxiaoNeural"
-WELCOME_TEXT = "欢迎光临"
-GOODBYE_TEXT = "明天见"
+
+def _cache_path(event_type: str) -> str:
+    return os.path.join(CACHE_DIR, f"tts_{event_type}.mp3")
 
 
 def generate_edge_wavs() -> None:
-    """启动时调用: 用 Edge TTS 预生成语音, 缓存命中跳过"""
-    _generate_cached(WELCOME_TEXT, _WELCOME_WAV)
-    _generate_cached(GOODBYE_TEXT, _GOODBYE_WAV)
-
-
-def _generate_cached(text: str, path: str) -> None:
-    if os.path.exists(path) and os.path.getsize(path) > 0:
-        logger.debug("TTS 缓存命中: %s", path)
-        return
-    _generate_wav(text, path)
+    """启动时调用: 预生成所有 TTS 缓存 (随机选一个变体)"""
+    for event_type, candidates in TTS_TEXTS.items():
+        path = _cache_path(event_type)
+        if os.path.exists(path) and os.path.getsize(path) > 0:
+            logger.debug("TTS 缓存命中: %s", event_type)
+            continue
+        template = random.choice(candidates)
+        text = template.format("")
+        _generate_wav(text, path)
 
 
 def _generate_wav(text: str, path: str) -> None:
@@ -49,22 +49,28 @@ async def _generate_edge_tts(text: str, path: str) -> None:
     logger.info("Edge TTS 生成: %s → %s", text, path)
 
 
-def play_welcome() -> None:
-    t = threading.Thread(target=_play_welcome, daemon=True)
+def play_tts(event_type: str, name: str = "") -> None:
+    """播放指定事件类型的语音, 异步不阻塞"""
+    t = threading.Thread(target=_play_tts, args=(event_type, name), daemon=True)
     t.start()
 
 
-def _play_welcome() -> None:
-    if os.path.exists(_WELCOME_WAV) and os.path.getsize(_WELCOME_WAV) > 0:
+def _play_tts(event_type: str, name: str) -> None:
+    path = _cache_path(event_type)
+    if os.path.exists(path) and os.path.getsize(path) > 0:
         try:
-            _play_wav(_WELCOME_WAV)
+            _play_wav(path)
             return
         except Exception as e:
-            logger.debug("WAV 播放失败: %s", e)
+            logger.debug("mp3 播放失败: %s", e)
+
+    candidates = TTS_TEXTS.get(event_type, ["{}"])
+    template = random.choice(candidates)
+    text = template.format(name)
 
     for backend in (_play_text_espeak, _play_text_powershell):
         try:
-            backend(WELCOME_TEXT)
+            backend(text)
             return
         except Exception:
             pass
@@ -72,27 +78,12 @@ def _play_welcome() -> None:
     logger.warning("无可用语音后端, 跳过语音播报")
 
 
+def play_welcome() -> None:
+    play_tts("check_in")
+
+
 def play_goodbye() -> None:
-    t = threading.Thread(target=_play_goodbye, daemon=True)
-    t.start()
-
-
-def _play_goodbye() -> None:
-    if os.path.exists(_GOODBYE_WAV) and os.path.getsize(_GOODBYE_WAV) > 0:
-        try:
-            _play_wav(_GOODBYE_WAV)
-            return
-        except Exception as e:
-            logger.debug("WAV 播放失败: %s", e)
-
-    for backend in (_play_text_espeak, _play_text_powershell):
-        try:
-            backend(GOODBYE_TEXT)
-            return
-        except Exception:
-            pass
-
-    logger.warning("无可用语音后端, 跳过签退语音")
+    play_tts("check_out")
 
 
 def _play_wav(path: str) -> None:

@@ -1,4 +1,4 @@
-"""Redis 签到去重: 用 TTL 替代 JSON 文件, 天然支持 10 分钟冷却"""
+"""Redis 签到去重: 当天签到状态 + 10 分钟冷却状态分开存储"""
 
 import logging
 
@@ -15,6 +15,7 @@ from config import (
 logger = logging.getLogger(__name__)
 
 KEY_PREFIX = "checkin"
+COOLDOWN_PREFIX = "checkin_cooldown"
 CHECKED_OUT_PREFIX = "checkout"
 
 
@@ -32,9 +33,8 @@ class RedisCheckIn:
         try:
             self._r.ping()
             logger.info("Redis 连接成功: %s:%s", REDIS_HOST, REDIS_PORT)
-        except Exception:
-            logger.warning("Redis 不可用, 签到去重降级为内存模式")
-            self._r = None
+        except Exception as e:
+            raise RuntimeError("Redis 不可用") from e
 
     def _today_key(self, name: str) -> str:
         from datetime import date
@@ -47,6 +47,9 @@ class RedisCheckIn:
 
         today = date.today().isoformat()
         return f"{CHECKED_OUT_PREFIX}:{today}:{name}"
+
+    def _cooldown_key(self, name: str) -> str:
+        return f"{COOLDOWN_PREFIX}:{name}"
 
     def _today_set_key(self) -> str:
         from datetime import date
@@ -66,14 +69,14 @@ class RedisCheckIn:
     def can_checkin(self, name: str, now: float | None = None) -> bool:
         if self._r is None:
             return True
-        ttl = self._r.ttl(self._today_key(name))
+        ttl = self._r.ttl(self._cooldown_key(name))
         return ttl <= 0
 
     def mark_checked_in(self, name: str) -> None:
         if self._r is None:
             return
-        key = self._today_key(name)
-        self._r.setex(key, CHECKIN_COOLDOWN_SECONDS, "1")
+        self._r.setex(self._today_key(name), self._seconds_until_tomorrow(), "1")
+        self._r.setex(self._cooldown_key(name), CHECKIN_COOLDOWN_SECONDS, "1")
         self._r.sadd(self._today_set_key(), name)
         self._r.expire(self._today_set_key(), 86400)
 
@@ -87,9 +90,20 @@ class RedisCheckIn:
         if self._r is None:
             return
         self._r.delete(self._today_key(name))
+        self._r.delete(self._cooldown_key(name))
         self.mark_checked_out(name)
 
     def get_today_count(self) -> int:
         if self._r is None:
             return 0
         return self._r.scard(self._today_set_key())
+
+    @staticmethod
+    def _seconds_until_tomorrow() -> int:
+        from datetime import datetime, timedelta
+
+        now = datetime.now()
+        tomorrow = (now + timedelta(days=1)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        return max(1, int((tomorrow - now).total_seconds()))
