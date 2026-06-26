@@ -288,20 +288,20 @@
             function doAction(action) {
                 switch (action) {
                     case 'greet':
-                        playMotion('Tap', 0);
                         setExpression('Smile');
+                        setTimeout(function () { playMotion('Tap', 0); }, 80);
                         playTTS('访客', 'welcome');
                         showStatus('打招呼中...');
                         break;
                     case 'bye':
-                        playMotion('Flick', 0);
                         setExpression('Normal');
+                        setTimeout(function () { playMotion('Flick', 0); }, 80);
                         playTTS('访客', 'goodbye');
                         showStatus('说再见...');
                         break;
                     case 'surprise':
-                        playMotion('FlickUp', 0);
                         setExpression('Surprised');
+                        setTimeout(function () { playMotion('FlickUp', 0); }, 80);
                         showStatus('惊讶中...');
                         break;
                     case 'smile':
@@ -408,25 +408,25 @@
             function handleEvent(msg) {
                 switch (msg.type) {
                     case 'check_in':
-                        playMotion('Tap', Math.floor(Math.random() * 4));
                         setExpression('Smile');
+                        setTimeout(function () { playMotion('Tap', Math.floor(Math.random() * 4)); }, 80);
                         playTTS(msg.name || '访客', 'welcome');
                         showStatus(msg.name + ' 签到');
                         break;
                     case 'check_out':
-                        playMotion('Flick', 0);
                         setExpression('Normal');
+                        setTimeout(function () { playMotion('Flick', 0); }, 80);
                         playTTS(msg.name || '访客', 'goodbye');
                         showStatus(msg.name + ' 签退');
                         break;
                     case 'stranger':
-                        playMotion('FlickUp', 0);
                         setExpression('Surprised');
+                        setTimeout(function () { playMotion('FlickUp', 0); }, 80);
                         showStatus('检测到陌生人');
                         break;
                     case 'idle':
                         setExpression('Normal');
-                        playMotion('Idle', 0);
+                        setTimeout(function () { playMotion('Idle', 0); }, 80);
                         showStatus('待机中');
                         break;
                 }
