@@ -12,7 +12,6 @@ from insightface.app import FaceAnalysis
 from config import (
     INSIGHTFACE_MODEL,
     DETECTION_THRESHOLD,
-    MATCH_THRESHOLD,
     DEBOUNCE_SECONDS,
     INSIGHTFACE_PROVIDERS,
 )
@@ -62,22 +61,6 @@ class FaceRecognizer:
             )
         return results
 
-    def match(
-        self, embedding: np.ndarray, face_db_embeddings: list[tuple[str, np.ndarray]]
-    ) -> tuple[str | None, float]:
-        if not face_db_embeddings:
-            return None, 0.0
-        best_name = None
-        best_similarity = 0.0
-        for name, db_embedding in face_db_embeddings:
-            sim = self._cosine_similarity(embedding, db_embedding)
-            if sim > best_similarity:
-                best_similarity = sim
-                best_name = name
-        if best_similarity < MATCH_THRESHOLD:
-            return None, best_similarity
-        return best_name, best_similarity
-
     def should_welcome(self, name: str) -> bool:
         now = time.time()
         last = self._last_welcome.get(name, 0)
@@ -92,7 +75,3 @@ class FaceRecognizer:
             self._last_stranger_log = now
             return True
         return False
-
-    @staticmethod
-    def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
-        return float(np.dot(a, b))

@@ -104,6 +104,7 @@ MYSQL_USER = os.getenv("MYSQL_USER", "root")
 MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "")
 MYSQL_DATABASE = os.getenv("MYSQL_DATABASE", "attendance")
 MYSQL_CHARSET = os.getenv("MYSQL_CHARSET", "utf8mb4")
+MYSQL_POOL_SIZE = _get_int("MYSQL_POOL_SIZE", 5)
 
 # ── PostgreSQL + pgvector 连接配置 (向量数据: 人脸特征) ──
 PG_HOST = os.getenv("PG_HOST", "127.0.0.1")
@@ -111,6 +112,7 @@ PG_PORT = _get_int("PG_PORT", 5434)
 PG_USER = os.getenv("PG_USER", "postgres")
 PG_PASSWORD = os.getenv("PG_PASSWORD", "")
 PG_DATABASE = os.getenv("PG_DATABASE", "face_db")
+PG_POOL_SIZE = _get_int("PG_POOL_SIZE", 5)
 
 # ── Redis 连接配置 (签到去重) ──
 REDIS_HOST = os.getenv("REDIS_HOST", "127.0.0.1")
@@ -119,7 +121,6 @@ REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", "")
 REDIS_DB = _get_int("REDIS_DB", 0)
 
 # ── 消息队列配置 (事件发布) ──
-MQ_BACKEND = os.getenv("MQ_BACKEND", "redis")  # "redis" | "kafka" | "rabbitmq"
 MQ_TOPIC_PREFIX = os.getenv("MQ_TOPIC_PREFIX", "attendance")
 
 # ── 数字人前端 ──

@@ -7,6 +7,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from typing import Protocol
 
 from config import (
     ALLOW_REPEAT_CHECKIN,
@@ -16,7 +17,6 @@ from config import (
     STRANGER_MIN_UNKNOWN_HITS,
 )
 from core.attendance_db import AttendanceDB
-from core.checkin import CheckInTracker
 from core.embedding_matcher import EmbeddingMatcher
 from core.events import EventBus
 from core.face_utils import check_face_quality, is_complete_face_for_stranger
@@ -26,6 +26,20 @@ from core.tracker import FaceTracker
 from core.vote import VoteBuffer
 
 logger = logging.getLogger(__name__)
+
+
+class CheckInStateStore(Protocol):
+    def is_checked_in_today(self, name: str) -> bool:
+        ...
+
+    def is_checked_out_today(self, name: str) -> bool:
+        ...
+
+    def mark_checked_in(self, name: str) -> None:
+        ...
+
+    def reset_checkin(self, name: str) -> None:
+        ...
 
 
 @dataclass
@@ -55,7 +69,7 @@ class RecognitionPipeline:
         tracker: FaceTracker,
         db_embeddings: list,
         attendance_db: AttendanceDB,
-        checkin_tracker: CheckInTracker,
+        checkin_tracker: CheckInStateStore,
         vote_buffer: VoteBuffer,
         rec_cache: RecognitionCache,
         event_bus: EventBus,

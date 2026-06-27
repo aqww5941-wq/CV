@@ -27,18 +27,7 @@ def register_employee(name: str) -> None:
 
 def list_employees() -> None:
     db = AttendanceDB()
-    db._ensure_conn()
-    cur = db._conn.cursor()
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS employees (
-            id          INT AUTO_INCREMENT PRIMARY KEY,
-            name        VARCHAR(255) NOT NULL UNIQUE,
-            created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    """)
-    cur.execute("SELECT name FROM employees ORDER BY id")
-    names = [row[0] for row in cur.fetchall()]
-    cur.close()
+    names = db.list_employees()
     _print_json({"ok": True, "names": names})
 
 

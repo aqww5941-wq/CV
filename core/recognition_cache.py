@@ -14,7 +14,7 @@ class RecognitionCache:
         cache = RecognitionCache()
         name, sim = cache.get(track_id)
         if name is None:
-            name, sim = recognizer.match(embedding, db_embeddings)
+            name, sim = matcher.match(embedding)
             if name is not None:
                 cache.set(track_id, name, sim)
     """

@@ -1,17 +1,17 @@
-"""消息队列事件发布: 签到/签退事件推送到 MQ 和数字人前端"""
+"""消息队列事件发布: 签到/签退事件推送到 Redis 和数字人前端"""
 
 import json
 import logging
 import time
 from datetime import datetime
 
-from config import MQ_BACKEND, MQ_TOPIC_PREFIX
+from config import MQ_TOPIC_PREFIX, REDIS_DB, REDIS_HOST, REDIS_PASSWORD, REDIS_PORT
 
 logger = logging.getLogger(__name__)
 
 
 class EventBus:
-    """事件总线: 支持 Redis Pub/Sub + HTTP 推送到数字人前端"""
+    """事件总线: 支持 Redis Pub/Sub + 数字人前端事件."""
 
     def __init__(self, emotion_module=None):
         self._backend = self._init_backend()
@@ -20,42 +20,21 @@ class EventBus:
         self._last_avatar_time: float = 0.0
 
     def _init_backend(self):
-        if MQ_BACKEND == "redis":
-            try:
-                import redis as rd
+        try:
+            import redis as rd
 
-                from config import REDIS_HOST, REDIS_PORT, REDIS_PASSWORD, REDIS_DB
-
-                r = rd.Redis(
-                    host=REDIS_HOST,
-                    port=REDIS_PORT,
-                    password=REDIS_PASSWORD or None,
-                    db=REDIS_DB,
-                    decode_responses=True,
-                )
-                r.ping()
-                logger.info("事件总线就绪: Redis Pub/Sub")
-                return r
-            except Exception as e:
-                logger.warning("Redis 不可用, 事件总线降级为日志模式: %s", e)
-                return None
-        elif MQ_BACKEND == "kafka":
-            try:
-                from kafka import KafkaProducer
-
-                producer = KafkaProducer(
-                    bootstrap_servers="localhost:9092",
-                    value_serializer=lambda v: json.dumps(v, ensure_ascii=False).encode(
-                        "utf-8"
-                    ),
-                )
-                logger.info("事件总线就绪: Kafka")
-                return producer
-            except Exception as e:
-                logger.warning("Kafka 不可用, 事件总线降级为日志模式: %s", e)
-                return None
-        else:
-            logger.warning("未知 MQ 后端 %s, 事件总线降级为日志模式", MQ_BACKEND)
+            r = rd.Redis(
+                host=REDIS_HOST,
+                port=REDIS_PORT,
+                password=REDIS_PASSWORD or None,
+                db=REDIS_DB,
+                decode_responses=True,
+            )
+            r.ping()
+            logger.info("事件总线就绪: Redis Pub/Sub")
+            return r
+        except Exception as e:
+            logger.warning("Redis 不可用, 事件总线降级为日志模式: %s", e)
             return None
 
     def publish(self, event_type: str, payload: dict) -> None:
@@ -72,8 +51,6 @@ class EventBus:
             )
         elif hasattr(self._backend, "publish"):
             self._backend.publish(topic, json.dumps(message, ensure_ascii=False))
-        elif hasattr(self._backend, "send"):
-            self._backend.send(topic, message)
         logger.debug("EVENT | %s | %s", topic, payload.get("name", "?"))
 
     def _avatar_event(self, event_type: str, payload: dict) -> None:

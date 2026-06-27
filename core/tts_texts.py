@@ -1,14 +1,7 @@
 """数字人和本地播报共用的 TTS 文案。"""
 
-VOICE = "zh-CN-XiaoxiaoNeural"
-
-VOICE_BY_MODEL = {
-    "epsilon": "zh-CN-XiaoxiaoNeural",
-    "chitose": "zh-CN-YunxiNeural",
-    "haruGreeter": "zh-CN-XiaoxiaoNeural",
-    "haru": "zh-CN-XiaoxiaoNeural",
-    "natori": "zh-CN-YunjianNeural",
-}
+from config import TTS_VOICE as VOICE
+from config import TTS_VOICE_BY_MODEL as VOICE_BY_MODEL
 
 TTS_TEXTS = {
     "check_in": [
