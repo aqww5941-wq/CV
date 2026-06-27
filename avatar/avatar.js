@@ -29,6 +29,7 @@
     let ttsMutedUntil = 0;
     let isSwitchingModel = false;
     let queuedModelKey = null;
+    let statusMode = 'idle';
 
     const MODEL_REGISTRY = {
         epsilon: {
@@ -171,7 +172,7 @@
 
     const BEHAVIORS = {
         greet: {
-            status: '打招呼中...',
+            status: '打招呼中',
             expression: 'Smile',
             motions: [
                 ['Tap', 0],
@@ -182,7 +183,7 @@
             idleDelay: 4200
         },
         wave: {
-            status: '招手中...',
+            status: '招手中',
             expression: 'Smile',
             motions: [
                 ['Tap', 0],
@@ -193,7 +194,7 @@
             idleDelay: 3600
         },
         bye: {
-            status: '说再见...',
+            status: '说再见中',
             expression: 'Normal',
             motions: [
                 ['Flick', 0],
@@ -203,6 +204,7 @@
             idleDelay: 4200
         },
         check_in: {
+            status: '打招呼中',
             expression: 'Smile',
             motions: [
                 ['Tap', 0],
@@ -214,6 +216,7 @@
             idleDelay: 4600
         },
         first_time: {
+            status: '欢迎中',
             expression: 'Blushing',
             motions: [
                 ['Tap', 0],
@@ -223,6 +226,7 @@
             idleDelay: 5200
         },
         returning: {
+            status: '欢迎中',
             expression: 'Smile',
             motions: [
                 ['Tap', 1],
@@ -233,6 +237,7 @@
             idleDelay: 5200
         },
         check_out: {
+            status: '告别中',
             expression: 'Normal',
             motions: [
                 ['Flick', 0],
@@ -242,6 +247,7 @@
             idleDelay: 4600
         },
         stranger: {
+            status: '好奇观察中',
             expression: 'Surprised',
             motions: [
                 ['FlickUp', 0],
@@ -251,6 +257,7 @@
             idleDelay: 4600
         },
         repeat: {
+            status: '互动中',
             expression: 'Blushing',
             motions: [
                 ['Shake', 0],
@@ -260,6 +267,7 @@
             idleDelay: 4600
         },
         attention: {
+            status: '注意到有人',
             expression: 'Smile',
             motions: [
                 ['Tap', 0],
@@ -268,6 +276,7 @@
             idleDelay: 3600
         },
         idle_long: {
+            status: '想念中',
             expression: 'Sad',
             motions: [
                 ['FlickDown', 0],
@@ -277,6 +286,7 @@
             idleDelay: 5600
         },
         crowd: {
+            status: '热闹接待中',
             expression: 'Surprised',
             motions: [
                 ['Flick3', 0],
@@ -287,7 +297,12 @@
         }
     };
 
-    function showStatus(text) {
+    function showStatus(text, mode) {
+        mode = mode || 'activity';
+        if (statusMode === 'speech' && mode !== 'speech') {
+            return;
+        }
+        statusMode = mode;
         statusEl.textContent = text;
     }
 
@@ -324,7 +339,7 @@
         if (!expression) return;
         try {
             model.expression(expression);
-            showStatus('表情: ' + getExpressionLabel(expression));
+            showStatus('表情：' + getExpressionLabel(expression), 'activity');
             document.querySelectorAll('#expression-buttons button').forEach(function (button) {
                 button.classList.toggle('active', button.dataset.name === expression);
             });
@@ -404,14 +419,13 @@
         loadSubtitleText(name, type, variant).then(function (text) {
             subtitleText = text;
             if (audioStarted && subtitleText) {
-                showSubtitle(subtitleText);
+                showStatus(subtitleText, 'speech');
             }
         });
 
         var modelKey = currentModelKey || DEFAULT_MODEL_KEY;
         var audioUrl = '/tts?name=' + encodeURIComponent(name || '访客') + '&type=' + type + '&variant=' + variant + '&model=' + encodeURIComponent(modelKey);
 
-        showStatus('正在准备语音...');
         fetch(audioUrl)
             .then(function (res) {
                 if (!res.ok) {
@@ -427,29 +441,27 @@
                     audioStarted = true;
                     startLipSync(audio);
                     if (subtitleText) {
-                        showSubtitle(subtitleText);
+                        showStatus(subtitleText, 'speech');
                     }
                 });
                 audio.addEventListener('ended', function () {
                     URL.revokeObjectURL(objectUrl);
+                    statusMode = 'idle';
                     stopLipSync();
-                    hideSubtitle(900);
+                    hideSubtitle();
                 });
                 audio.addEventListener('error', function () {
                     URL.revokeObjectURL(objectUrl);
+                    statusMode = 'idle';
                     stopLipSync();
-                    showStatus('语音播放失败');
                     hideSubtitle();
                 });
                 return audio.play();
             })
             .catch(function (err) {
                 if (requestId !== ttsRequestId) return;
+                statusMode = 'idle';
                 stopLipSync();
-                var message = err && err.name === 'NotAllowedError'
-                    ? '浏览器阻止了自动语音播放'
-                    : '语音生成失败，请稍后重试';
-                showStatus(message);
                 console.error('TTS play failed:', err);
                 hideSubtitle();
             });
@@ -631,7 +643,7 @@
             playTTS(options.name || '访客', options.tts || behavior.tts);
         }
 
-        showStatus(options.status || behavior.status || '执行动作中');
+        showStatus(behavior.status || '动作中', 'activity');
         scheduleIdle(options.idleDelay || behavior.idleDelay || 4000);
     }
 
@@ -647,7 +659,7 @@
                 runBehavior('bye', { name: '访客' });
                 break;
             case 'surprise':
-                runBehavior('stranger', { name: '访客', silent: true, status: '惊讶中...' });
+                runBehavior('stranger', { name: '访客', silent: true });
                 break;
             case 'smile':
                 setExpression('Smile');
@@ -746,7 +758,7 @@
                     button.textContent = motionLabel + (count > 1 ? '[' + index + ']' : '');
                     button.addEventListener('click', function () {
                         playMotion(name, index);
-                        showStatus('动作: ' + motionLabel);
+                        showStatus('动作：' + motionLabel, 'activity');
                     });
                     motionContainer.appendChild(button);
                 })(internalName, i);
@@ -781,7 +793,6 @@
         var lastError = null;
         for (var attempt = 1; attempt <= MODEL_LOAD_ATTEMPTS; attempt++) {
             try {
-                showStatus('正在加载 ' + config.label + '... (' + attempt + '/' + MODEL_LOAD_ATTEMPTS + ')');
                 return await Live2DModel.from(config.path);
             } catch (err) {
                 lastError = err;
@@ -811,7 +822,6 @@
                 return { key: key, model: loadedModel };
             } catch (err) {
                 lastError = err;
-                showStatus('模型加载失败，尝试备用人物...');
             }
         }
         throw lastError || new Error('all models failed');
@@ -821,7 +831,6 @@
         if (!MODEL_REGISTRY[key]) return;
         if (isSwitchingModel) {
             queuedModelKey = key;
-            showStatus('正在切换数字人，稍后切换到 ' + MODEL_REGISTRY[key].label);
             return;
         }
 
@@ -864,7 +873,6 @@
         currentModelKey = key;
         currentModelConfig = MODEL_REGISTRY[key];
         setModelSwitcherBusy(true);
-        showStatus('正在切换到 ' + currentModelConfig.label + '...');
         loadingEl.innerHTML = '<div class="spinner"></div><div>正在加载数字人...</div>';
         loadingEl.style.display = 'block';
         loadingEl.style.opacity = '1';
@@ -904,7 +912,6 @@
             currentModelKey = previousKey;
             currentModelConfig = previousConfig;
             model = previousModel;
-            showStatus('模型加载失败: ' + (MODEL_REGISTRY[key].label || key));
             loadingEl.innerHTML = '<div>模型加载失败</div><div style="font-size:14px;margin-top:8px;color:#ff6b6b">' + err.message + '</div>';
         } finally {
             setModelSwitcherBusy(false);
@@ -939,45 +946,52 @@
     }
 
     function handleEvent(msg) {
+        if (msg.type === 'speech') {
+            clearIdleTimer();
+            if (msg.text) {
+                showStatus(msg.text, 'speech');
+                hideSubtitle();
+            }
+            return;
+        }
+
+        if (msg.type === 'speech_end') {
+            statusMode = 'idle';
+            hideSubtitle();
+            scheduleIdle(800);
+            return;
+        }
+
         clearIdleTimer();
         switch (msg.type) {
-            case 'speech':
-                if (msg.text) {
-                    showStatus(msg.text);
-                    showSubtitle(msg.text);
-                }
-                break;
-            case 'speech_end':
-                hideSubtitle(900);
-                break;
             case 'check_in':
                 if (msg.is_first) {
-                    runBehavior('greet', { name: msg.name || '访客', silent: true, status: (msg.name || '访客') + ' 首次签到' });
+                    runBehavior('greet', { name: msg.name || '访客', silent: true });
                 } else if (msg.is_returning) {
-                    runBehavior('greet', { name: msg.name || '访客', silent: true, status: (msg.name || '访客') + ' 回访签到' });
+                    runBehavior('greet', { name: msg.name || '访客', silent: true });
                 } else {
-                    runBehavior('greet', { name: msg.name || '访客', silent: true, status: (msg.name || '访客') + ' 签到' });
+                    runBehavior('greet', { name: msg.name || '访客', silent: true });
                 }
                 break;
             case 'check_out':
-                runBehavior('check_out', { name: msg.name || '访客', silent: true, status: (msg.name || '访客') + ' 签退' });
+                runBehavior('check_out', { name: msg.name || '访客', silent: true });
                 break;
             case 'stranger':
-                runBehavior('stranger', { name: '', silent: true, status: '检测到陌生人' });
+                runBehavior('stranger', { name: '', silent: true });
                 break;
             case 'repeat':
-                runBehavior('repeat', { name: msg.name || '访客', silent: true, status: (msg.name || '访客') + ' 又来打招呼啦' });
+                runBehavior('repeat', { name: msg.name || '访客', silent: true });
                 break;
             case 'attention':
                 if (idleState === 'idle') {
-                    runBehavior('attention', { silent: true, status: '有人来了...' });
+                    runBehavior('attention', { silent: true });
                 }
                 break;
             case 'idle_long':
-                runBehavior('idle_long', { name: '', silent: true, status: '长时间无人' });
+                runBehavior('idle_long', { name: '', silent: true });
                 break;
             case 'crowd':
-                runBehavior('crowd', { name: '', silent: true, status: '多人出现! (' + (msg.count || '') + '人)' });
+                runBehavior('crowd', { name: '', silent: true });
                 break;
         }
     }
@@ -996,9 +1010,10 @@
 
     function enterIdle() {
         idleState = 'idle';
+        statusMode = 'idle';
         setExpression('Normal');
         playMotion('Idle', 0);
-        showStatus('待机中');
+        showStatus('待机中', 'idle');
         startIdleCycle();
     }
 
