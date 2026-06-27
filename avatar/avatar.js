@@ -943,11 +943,11 @@
         switch (msg.type) {
             case 'check_in':
                 if (msg.is_first) {
-                    runBehavior('first_time', { name: msg.name || '访客', silent: true, status: (msg.name || '访客') + ' 首次签到' });
+                    runBehavior('greet', { name: msg.name || '访客', silent: true, status: (msg.name || '访客') + ' 首次签到' });
                 } else if (msg.is_returning) {
-                    runBehavior('returning', { name: msg.name || '访客', silent: true, status: (msg.name || '访客') + ' 回访签到' });
+                    runBehavior('greet', { name: msg.name || '访客', silent: true, status: (msg.name || '访客') + ' 回访签到' });
                 } else {
-                    runBehavior('check_in', { name: msg.name || '访客', silent: true, status: (msg.name || '访客') + ' 签到' });
+                    runBehavior('greet', { name: msg.name || '访客', silent: true, status: (msg.name || '访客') + ' 签到' });
                 }
                 break;
             case 'check_out':

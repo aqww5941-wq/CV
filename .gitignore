@@ -30,6 +30,7 @@ Desktop.ini
 *~
 
 # IDE
+.trae/
 .vscode/
 .idea/
 

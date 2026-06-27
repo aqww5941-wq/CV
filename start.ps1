@@ -1,50 +1,90 @@
-$ErrorActionPreference = "Stop"
-$host.ui.RawUI.WindowTitle = "AI 智慧前台数字人系统"
+$ErrorActionPreference = "Continue"
+$Host.UI.RawUI.WindowTitle = "AI 智慧前台数字人系统"
 
-Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  AI 智慧前台数字人系统 - 一键启动" -ForegroundColor Cyan
-Write-Host "========================================" -ForegroundColor Cyan
-Write-Host ""
+$RootDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$AvatarDir = Join-Path $RootDir "avatar"
+$AvatarPort = 3456
+$LogDir = Join-Path $RootDir "cache\logs"
+$NodeProcess = $null
+$PythonProcess = $null
+$Script:Stopping = $false
 
-$root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$avatarDir = Join-Path $root "avatar"
-$avatarPort = 3456
+function Write-Banner {
+    Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host "  AI 智慧前台数字人系统 - 一键启动" -ForegroundColor Cyan
+    Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host ""
+}
+
+function Write-Section {
+    param(
+        [int]$Index,
+        [int]$Total,
+        [string]$Title
+    )
+    [Console]::WriteLine("")
+    Write-Host ("[{0}/{1}] {2}" -f $Index, $Total, $Title) -ForegroundColor Yellow
+}
+
+function Write-Status {
+    param(
+        [string]$Name,
+        [string]$Status,
+        [string]$Message = "",
+        [ConsoleColor]$Color = "Gray"
+    )
+    [Console]::Write("`r")
+    Write-Host ("       {0,-12} [{1,-5}] {2}" -f $Name, $Status, $Message) -ForegroundColor $Color
+}
+
+function Stop-System {
+    if ($Script:Stopping) {
+        return
+    }
+    $Script:Stopping = $true
+
+    Write-Host ""
+    Write-Status "系统" "STOP" "正在停止服务..." "Yellow"
+    if ($NodeProcess -and -not $NodeProcess.HasExited) {
+        Stop-ProcessQuietly -ProcessId $NodeProcess.Id
+    }
+    if ($PythonProcess -and -not $PythonProcess.HasExited) {
+        Stop-ProcessQuietly -ProcessId $PythonProcess.Id
+    }
+    Write-Status "系统" "OK" "已停止" "Green"
+}
 
 function Import-DotEnv {
     param([string]$Path)
 
-    if (-not (Test-Path $Path)) {
-        Write-Host "       未找到 .env，使用系统环境变量和默认配置" -ForegroundColor DarkGray
+    if (-not (Test-Path -LiteralPath $Path)) {
+        Write-Status ".env" "SKIP" "未找到，使用系统环境变量和默认配置" "DarkGray"
         return
     }
 
-    Get-Content $Path | ForEach-Object {
-        $line = $_.Trim()
-        if (-not $line -or $line.StartsWith("#")) {
-            return
+    foreach ($RawLine in Get-Content -LiteralPath $Path) {
+        $Line = $RawLine.Trim()
+        if ([string]::IsNullOrWhiteSpace($Line) -or $Line.StartsWith("#")) {
+            continue
         }
-        if ($line -notmatch "^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$") {
-            return
+        if ($Line -notmatch "^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$") {
+            continue
         }
 
-        $name = $matches[1]
-        $value = $matches[2].Trim()
+        $Name = $Matches[1]
+        $Value = $Matches[2].Trim()
         if (
-            ($value.StartsWith('"') -and $value.EndsWith('"')) -or
-            ($value.StartsWith("'") -and $value.EndsWith("'"))
+            ($Value.StartsWith('"') -and $Value.EndsWith('"')) -or
+            ($Value.StartsWith("'") -and $Value.EndsWith("'"))
         ) {
-            $value = $value.Substring(1, $value.Length - 2)
+            $Value = $Value.Substring(1, $Value.Length - 2)
         }
 
-        if (-not [Environment]::GetEnvironmentVariable($name, "Process")) {
-            [Environment]::SetEnvironmentVariable($name, $value, "Process")
-        }
+        [Environment]::SetEnvironmentVariable($Name, $Value, "Process")
     }
 
-    Write-Host "       已加载 .env 配置" -ForegroundColor Green
+    Write-Status ".env" "OK" "已加载 $Path" "Green"
 }
-
-Import-DotEnv (Join-Path $root ".env")
 
 function Read-YesNo {
     param(
@@ -52,295 +92,461 @@ function Read-YesNo {
         [bool]$DefaultYes = $true
     )
 
-    $suffix = if ($DefaultYes) { "Y/n" } else { "y/N" }
+    $Suffix = if ($DefaultYes) { "Y/n" } else { "y/N" }
     while ($true) {
-        $answer = Read-Host "$Prompt ($suffix)"
-        if ([string]::IsNullOrWhiteSpace($answer)) {
+        $Answer = Read-Host "$Prompt ($Suffix)"
+        if ([string]::IsNullOrWhiteSpace($Answer)) {
             return $DefaultYes
         }
-        switch ($answer.Trim().ToLowerInvariant()) {
+
+        switch ($Answer.Trim().ToLowerInvariant()) {
             "y" { return $true }
             "yes" { return $true }
             "是" { return $true }
             "n" { return $false }
             "no" { return $false }
             "否" { return $false }
-            default { Write-Host "       请输入 y 或 n" -ForegroundColor DarkYellow }
+            default { Write-Status "输入" "WARN" "请输入 y 或 n" "DarkYellow" }
         }
     }
 }
 
-$logDir = Join-Path $root "cache\logs"
-New-Item -ItemType Directory -Path $logDir -Force | Out-Null
-$nodeLog = Join-Path $logDir "avatar-node.log"
-$nodeErrLog = Join-Path $logDir "avatar-node.err.log"
-$pythonLog = Join-Path $logDir "app-python.log"
-$pythonErrLog = Join-Path $logDir "app-python.err.log"
-$pyProcess = $null
-
-# ── 1. 数据库服务确认 / WSL 启动 ──
-Write-Host "[1/5] 数据库服务确认..." -ForegroundColor Yellow
-
-$dbAlreadyRunning = Read-YesNo "MySQL / Redis / PostgreSQL 服务是否已经开启？"
-$hasWsl = $false
-$mysqlOk = $false
-$redisOk = $false
-$pgsqlOk = $false
-
-if ($dbAlreadyRunning) {
-    try { $hasWsl = (wsl -l -q 2>$null | Out-String).Trim() -ne "" } catch {}
-    Write-Host "       已确认数据库服务开启，跳过 WSL 启动" -ForegroundColor Green
-    $mysqlOk = $true
-    $redisOk = $true
-    $pgsqlOk = $true
-}
-else {
-    try { $hasWsl = (wsl -l -q 2>$null | Out-String).Trim() -ne "" } catch {}
-    if (-not $hasWsl) {
-        Write-Host "       未检测到可用 WSL，无法自动启动数据库服务。" -ForegroundColor Red
-        Write-Host "       请手动启动 MySQL / Redis / PostgreSQL 后重新运行脚本。" -ForegroundColor DarkYellow
-        exit 1
-    }
-
-    Write-Host "       正在通过 WSL 启动数据库服务..." -ForegroundColor Gray
-
-    wsl -e bash -c "sudo service mysql start 2>/dev/null" 2>$null
-    Start-Sleep -Seconds 1
-    wsl -e bash -c "sudo service mysql status 2>/dev/null" 2>$null
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "       MySQL      启动成功 (WSL)" -ForegroundColor Green
-        $mysqlOk = $true
-    }
-    else {
-        Write-Host "       MySQL      启动失败! 请检查 WSL 中 MySQL 是否安装" -ForegroundColor Red
-    }
-
-    wsl -e bash -c "sudo service redis-server start 2>/dev/null" 2>$null
-    Start-Sleep -Seconds 1
-    wsl -e bash -c "sudo service redis-server status 2>/dev/null" 2>$null
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "       Redis      启动成功 (WSL)" -ForegroundColor Green
-        $redisOk = $true
-    }
-    else {
-        Write-Host "       Redis      启动失败! 请检查 WSL 中 Redis 是否安装" -ForegroundColor Red
-    }
-
-    wsl -e bash -c "sudo service postgresql start 2>/dev/null" 2>$null
-    Start-Sleep -Seconds 1
-    wsl -e bash -c "sudo service postgresql status 2>/dev/null" 2>$null
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "       PostgreSQL 启动成功 (WSL)" -ForegroundColor Green
-        $pgsqlOk = $true
-    }
-    else {
-        Write-Host "       PostgreSQL 启动失败! 请检查 WSL 中 PostgreSQL 是否安装" -ForegroundColor Red
-    }
-}
-
-if (-not $mysqlOk) {
-    Write-Host "       MySQL 不可用，考勤模块无法初始化，启动已停止。" -ForegroundColor Red
-    Write-Host "       请先启动 MySQL，或后续为 app.py 增加无数据库降级模式。" -ForegroundColor DarkYellow
-    exit 1
-}
-
-# ── 2. 可选清除测试数据 (Redis 缓存 + 签到记录) ──
-Write-Host "[2/5] 检查测试数据清理配置..." -ForegroundColor Yellow
-
-if ($env:CLEAR_TEST_DATA -eq "1") {
-    Write-Host "       CLEAR_TEST_DATA=1，正在清除测试数据..." -ForegroundColor Yellow
-
-    if ($redisOk) {
-        try {
-            $redisPatterns = @("checkin:*", "checkin_cooldown:*", "checkout:*")
-            if ($hasWsl) {
-                foreach ($pattern in $redisPatterns) {
-                    wsl -e bash -c "redis-cli KEYS '$pattern' | xargs -r redis-cli DEL" 2>$null
-                }
-            }
-            else {
-                foreach ($pattern in $redisPatterns) {
-                    & redis-cli KEYS $pattern | ForEach-Object { & redis-cli DEL $_ } 2>$null
-                }
-            }
-            Write-Host "       Redis 签到缓存已清除" -ForegroundColor Green
-        }
-        catch {
-            Write-Host "       Redis 清除失败 (不影响启动)" -ForegroundColor DarkYellow
-        }
-    }
-    else {
-        Write-Host "       Redis 不可用, 跳过清除" -ForegroundColor DarkYellow
-    }
-
-    if ($mysqlOk) {
-        try {
-            if ($hasWsl) {
-                wsl -e bash -c "mysql -u root -p123456 attendance -e 'TRUNCATE TABLE attendance;' 2>/dev/null"
-            }
-            Write-Host "       MySQL 签到记录已清除" -ForegroundColor Green
-        }
-        catch {
-            Write-Host "       MySQL 清除失败 (不影响启动)" -ForegroundColor DarkYellow
-        }
-    }
-    else {
-        Write-Host "       MySQL 不可用, 跳过清除" -ForegroundColor DarkYellow
-    }
-}
-else {
-    Write-Host "       已跳过测试数据清理。如需演示清库，请在 .env 设置 CLEAR_TEST_DATA=1" -ForegroundColor Green
-}
-
-# ── 3. 启动 Node 数字人服务 ──
-Write-Host "[3/5] 启动数字人前端 (端口 $avatarPort)..." -ForegroundColor Yellow
-
-$existing = Get-NetTCPConnection -LocalPort $avatarPort -ErrorAction SilentlyContinue |
-Where-Object { $_.OwningProcess -and $_.OwningProcess -gt 0 } |
-Select-Object -ExpandProperty OwningProcess -Unique
-if ($existing) {
-    Write-Host "       端口 $avatarPort 被占用, 尝试释放..." -ForegroundColor DarkYellow
-    $existing | ForEach-Object {
-        Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue
-    }
-    Start-Sleep -Seconds 1
-}
-
-$nodeProcess = Start-Process -FilePath "node" -ArgumentList "server.js" -WorkingDirectory $avatarDir -PassThru -WindowStyle Hidden -RedirectStandardOutput $nodeLog -RedirectStandardError $nodeErrLog
-Start-Sleep -Seconds 2
-
-if ($nodeProcess.HasExited) {
-    Write-Host "       Node 启动失败! 请检查 $avatarDir\server.js" -ForegroundColor Red
-    exit 1
-}
-Write-Host "       数字人前端已启动 (PID: $($nodeProcess.Id))" -ForegroundColor Green
-
-if ($env:ENABLE_TTS_PREWARM -eq "1") {
-    Write-Host "       正在预生成数字人语音缓存..." -ForegroundColor Yellow
-    $prewarmDeadline = (Get-Date).AddMinutes(5)
-    $prewarmReady = $false
-    while ((Get-Date) -lt $prewarmDeadline) {
-        try {
-            $status = Invoke-RestMethod -Uri "http://localhost:$avatarPort/tts-prewarm-status" -TimeoutSec 3
-            $done = [int]$status.generated + [int]$status.skipped
-            Write-Host ("       语音缓存: {0}/{1}" -f $done, $status.total) -ForegroundColor DarkGray
-            if ($status.complete) {
-                if ($status.error) {
-                    Write-Host "       语音预生成失败: $($status.error)" -ForegroundColor Red
-                    Stop-Process -Id $nodeProcess.Id -Force -ErrorAction SilentlyContinue
-                    exit 1
-                }
-                else {
-                    Write-Host "       语音缓存已就绪" -ForegroundColor Green
-                    $prewarmReady = $true
-                }
-                break
-            }
-        }
-        catch {
-            Write-Host "       等待数字人服务响应..." -ForegroundColor DarkGray
-        }
-        Start-Sleep -Seconds 3
-    }
-
-    if (-not $prewarmReady) {
-        Write-Host "       语音预生成未完成，系统不会继续启动。请检查网络或 Edge TTS 服务后重试。" -ForegroundColor Red
-        Stop-Process -Id $nodeProcess.Id -Force -ErrorAction SilentlyContinue
-        exit 1
-    }
-}
-else {
-    Write-Host "       已跳过旧版全量语音预生成，语音将按事件异步生成并缓存" -ForegroundColor Green
-}
-
-# ── 4. 打开浏览器并等待数字人加载 ──
-Write-Host "[4/5] 打开数字人页面并等待模型加载..." -ForegroundColor Yellow
-
-$url = "http://localhost:$avatarPort/?display&v=$([DateTimeOffset]::Now.ToUnixTimeSeconds())"
-Start-Process "msedge" -ArgumentList "--new-window", "--kiosk", $url, "--edge-kiosk-type=fullscreen", "--autoplay-policy=no-user-gesture-required"
-
-$avatarReadyDeadline = (Get-Date).AddMinutes(2)
-$avatarReady = $false
-while ((Get-Date) -lt $avatarReadyDeadline) {
+function Test-WslAvailable {
     try {
-        $ready = Invoke-RestMethod -Uri "http://localhost:$avatarPort/avatar-ready" -TimeoutSec 2
-        if ($ready.ready) {
-            Write-Host "       数字人模型已加载: $($ready.model)" -ForegroundColor Green
-            $avatarReady = $true
-            break
-        }
-        Write-Host "       等待数字人模型加载..." -ForegroundColor DarkGray
+        $Output = & wsl.exe -l -q 2>$null
+        return -not [string]::IsNullOrWhiteSpace(($Output | Out-String).Trim())
     }
     catch {
-        Write-Host "       等待数字人页面响应..." -ForegroundColor DarkGray
+        return $false
     }
+}
+
+function Invoke-WslDatabaseStartup {
+    $Script = @'
+set +e
+
+sudo service mysql start >/dev/null 2>&1
+sleep 1
+if sudo service mysql status >/dev/null 2>&1; then
+    echo "MYSQL=OK"
+else
+    echo "MYSQL=FAIL"
+fi
+
+sudo service redis-server start >/dev/null 2>&1
+sleep 1
+if sudo service redis-server status >/dev/null 2>&1 || redis-cli -h 127.0.0.1 -p 6379 ping >/dev/null 2>&1; then
+    echo "REDIS=OK"
+else
+    echo "REDIS=FAIL"
+fi
+
+sudo service postgresql start >/dev/null 2>&1
+sleep 1
+if sudo service postgresql status >/dev/null 2>&1; then
+    echo "PGSQL=OK"
+else
+    echo "PGSQL=FAIL"
+fi
+'@
+    return & wsl.exe -e bash -lc $Script 2>&1
+}
+
+function Initialize-WslSudo {
+    Write-Status "sudo" "WAIT" "请在下方输入 WSL sudo 密码并回车" "Yellow"
+    & wsl.exe -e sudo -v
+    if ($LASTEXITCODE -ne 0) {
+        throw "sudo 验证失败，无法启动 WSL 服务。"
+    }
+    Write-Status "sudo" "OK" "验证完成" "Green"
+}
+
+function Stop-ProcessQuietly {
+    param([int]$ProcessId)
+
+    if ($ProcessId -gt 0) {
+        Stop-Process -Id $ProcessId -ErrorAction SilentlyContinue
+    }
+}
+
+function Stop-PortOwner {
+    param([int]$Port)
+
+    $ProcessIds = Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue |
+        Where-Object { $_.OwningProcess -and $_.OwningProcess -gt 0 } |
+        Select-Object -ExpandProperty OwningProcess -Unique
+
+    foreach ($ProcessId in $ProcessIds) {
+        Write-Status "端口$Port" "STOP" "结束占用进程 PID=$ProcessId" "DarkYellow"
+        Stop-ProcessQuietly -ProcessId $ProcessId
+    }
+
+    if ($ProcessIds) {
+        Start-Sleep -Seconds 1
+    }
+}
+
+function Wait-HttpJson {
+    param(
+        [string]$Uri,
+        [int]$TimeoutSeconds,
+        [scriptblock]$Ready
+    )
+
+    $Deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $Deadline) {
+        try {
+            $Response = Invoke-RestMethod -Uri $Uri -TimeoutSec 2
+            if (& $Ready $Response) {
+                return $Response
+            }
+        }
+        catch {
+        }
+        Start-Sleep -Seconds 2
+    }
+
+    return $null
+}
+
+function Initialize-Logs {
+    New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
+    return @{
+        NodeOut = Join-Path $LogDir "avatar-node.log"
+        NodeErr = Join-Path $LogDir "avatar-node.err.log"
+        PyOut = Join-Path $LogDir "app-python.log"
+        PyErr = Join-Path $LogDir "app-python.err.log"
+    }
+}
+
+function Initialize-Databases {
+    Write-Section 1 5 "数据库服务确认"
+
+    $AlreadyRunning = Read-YesNo "MySQL / Redis / PostgreSQL 服务是否已经开启？"
+    $State = @{
+        HasWsl = Test-WslAvailable
+        MySQL = $false
+        Redis = $false
+        PostgreSQL = $false
+    }
+
+    if ($AlreadyRunning) {
+        Write-Status "数据库" "SKIP" "已确认开启，跳过 WSL 启动" "Green"
+        $State.MySQL = $true
+        $State.Redis = $true
+        $State.PostgreSQL = $true
+        return $State
+    }
+
+    if (-not $State.HasWsl) {
+        Write-Status "WSL" "FAIL" "未检测到可用 WSL" "Red"
+        throw "请手动启动 MySQL / Redis / PostgreSQL 后重新运行脚本。"
+    }
+
+    Initialize-WslSudo
+    Write-Status "WSL" "RUN" "正在启动数据库服务（可能需要输入 sudo 密码）" "Gray"
+    $Output = Invoke-WslDatabaseStartup
+
+    $State.MySQL = ($Output -match "MYSQL=OK")
+    $State.Redis = ($Output -match "REDIS=OK")
+    $State.PostgreSQL = ($Output -match "PGSQL=OK")
+
+    if ($State.MySQL) {
+        Write-Status "MySQL" "OK" "已运行 (WSL)" "Green"
+    }
+    else {
+        Write-Status "MySQL" "FAIL" "启动失败，请检查 WSL 中 MySQL" "Red"
+    }
+
+    if ($State.Redis) {
+        Write-Status "Redis" "OK" "redis-server 已运行 (WSL)" "Green"
+    }
+    else {
+        Write-Status "Redis" "FAIL" "redis-server 启动失败，请检查 WSL Redis" "Red"
+    }
+
+    if ($State.PostgreSQL) {
+        Write-Status "PostgreSQL" "OK" "已运行 (WSL)" "Green"
+    }
+    else {
+        Write-Status "PostgreSQL" "FAIL" "启动失败，请检查 WSL 中 PostgreSQL" "Red"
+    }
+
+    if (-not $State.MySQL) {
+        throw "MySQL 不可用，考勤模块无法初始化。"
+    }
+
+    return $State
+}
+
+function Clear-TestDataIfRequested {
+    param([hashtable]$DatabaseState)
+
+    Write-Section 2 5 "测试数据清理"
+    Write-Status "配置" "INFO" "CLEAR_TEST_DATA=$($env:CLEAR_TEST_DATA)" "DarkGray"
+
+    if ($env:CLEAR_TEST_DATA -ne "1") {
+        Write-Status "测试数据" "SKIP" "如需演示清库，请在 .env 设置 CLEAR_TEST_DATA=1" "Green"
+        return
+    }
+
+    Write-Status "测试数据" "RUN" "正在清除 Redis / MySQL 测试数据" "Yellow"
+
+    if ($DatabaseState.Redis) {
+        try {
+            $RedisCleanScript = @'
+for pattern in 'checkin:*' 'checkin_cooldown:*' 'checkout:*'; do
+    redis-cli --scan --pattern "$pattern" | xargs -r redis-cli DEL >/dev/null
+done
+'@
+            & wsl.exe -e bash -lc $RedisCleanScript 2>$null
+            Write-Status "Redis" "OK" "签到缓存已清除" "Green"
+        }
+        catch {
+            Write-Status "Redis" "WARN" "清除失败，不影响启动" "DarkYellow"
+        }
+    }
+    else {
+        Write-Status "Redis" "SKIP" "不可用，跳过清除" "DarkYellow"
+    }
+
+    if ($DatabaseState.MySQL) {
+        try {
+            $MySqlCleanSql = @'
+CREATE DATABASE IF NOT EXISTS attendance;
+USE attendance;
+CREATE TABLE IF NOT EXISTS attendance (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    date VARCHAR(10) NOT NULL,
+    check_in VARCHAR(8) NOT NULL,
+    check_out VARCHAR(8),
+    duration INT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+TRUNCATE TABLE attendance;
+'@
+            if ($DatabaseState.HasWsl) {
+                $BashCmd = "MYSQL_PWD='123456' mysql -u root <<'EOSQL'`n$MySqlCleanSql`nEOSQL"
+                $MySqlOutput = & wsl.exe -e bash -lc $BashCmd 2>&1
+            }
+            else {
+                $env:MYSQL_PWD = "123456"
+                $MySqlOutput = & mysql -u root -e $MySqlCleanSql 2>&1
+                Remove-Item Env:\MYSQL_PWD -ErrorAction SilentlyContinue
+            }
+
+            if ($LASTEXITCODE -ne 0) {
+                $Message = ($MySqlOutput | Out-String).Trim()
+                if (-not $Message) {
+                    $Message = "mysql exit code $LASTEXITCODE"
+                }
+                throw $Message
+            }
+            Write-Status "MySQL" "OK" "签到记录已清除" "Green"
+        }
+        catch {
+            Write-Status "MySQL" "WARN" "清除失败，不影响启动: $($_.Exception.Message)" "DarkYellow"
+        }
+    }
+}
+
+function Start-AvatarServer {
+    param([hashtable]$Logs)
+
+    Write-Section 3 5 "启动数字人前端"
+    Stop-PortOwner -Port $AvatarPort
+
+    $Process = Start-Process `
+        -FilePath "node" `
+        -ArgumentList @("server.js") `
+        -WorkingDirectory $AvatarDir `
+        -PassThru `
+        -WindowStyle Hidden `
+        -RedirectStandardOutput $Logs.NodeOut `
+        -RedirectStandardError $Logs.NodeErr
+
     Start-Sleep -Seconds 2
-}
-
-if (-not $avatarReady) {
-    Write-Host "       数字人模型未加载完成，系统不会打开摄像头。" -ForegroundColor Red
-    Stop-Process -Id $nodeProcess.Id -Force -ErrorAction SilentlyContinue
-    exit 1
-}
-
-# ── 5. 启动 Python 人脸识别 ──
-Write-Host "[5/5] 启动人脸识别引擎..." -ForegroundColor Yellow
-
-$oldAppProcesses = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match '(^| )app\.py( |$)' }
-if ($oldAppProcesses) {
-    Write-Host "       发现旧识别进程，正在清理..." -ForegroundColor DarkYellow
-    $oldAppProcesses | ForEach-Object {
-        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+    if ($Process.HasExited) {
+        throw "Node 启动失败，请检查 $AvatarDir\server.js 和日志 $($Logs.NodeErr)"
     }
-    Start-Sleep -Seconds 1
+
+    Write-Status "Node" "OK" "数字人服务已启动 PID=$($Process.Id)" "Green"
+    return $Process
 }
 
-$venvPython = Join-Path $root ".venv\Scripts\python.exe"
-if (-not (Test-Path $venvPython)) {
-    $venvPython = "python"
+function Wait-TtsPrewarmIfEnabled {
+    param([System.Diagnostics.Process]$Process)
+
+    if ($env:ENABLE_TTS_PREWARM -ne "1") {
+        Write-Status "TTS预热" "SKIP" "语音将按事件异步生成并缓存" "Green"
+        return
+    }
+
+    Write-Status "TTS预热" "RUN" "正在生成旧版全量语音缓存" "Yellow"
+    $Deadline = (Get-Date).AddMinutes(5)
+    while ((Get-Date) -lt $Deadline) {
+        try {
+            $Status = Invoke-RestMethod -Uri "http://localhost:$AvatarPort/tts-prewarm-status" -TimeoutSec 3
+            $Done = [int]$Status.generated + [int]$Status.skipped
+            Write-Status "TTS缓存" "INFO" ("{0}/{1}" -f $Done, $Status.total) "DarkGray"
+
+            if ($Status.complete) {
+                if ($Status.error) {
+                    throw "语音预生成失败: $($Status.error)"
+                }
+                Write-Status "TTS预热" "OK" "语音缓存已就绪" "Green"
+                return
+            }
+        }
+        catch {
+            Write-Status "TTS预热" "WAIT" "等待数字人服务响应" "DarkGray"
+        }
+        Start-Sleep -Seconds 3
+    }
+
+    Stop-ProcessQuietly -ProcessId $Process.Id
+    throw "语音预生成未完成。"
 }
 
-$pyProcess = Start-Process -FilePath $venvPython -ArgumentList "app.py" -WorkingDirectory $root -PassThru -WindowStyle Hidden -RedirectStandardOutput $pythonLog -RedirectStandardError $pythonErrLog
-Start-Sleep -Seconds 4
+function Open-AvatarBrowserAndWait {
+    param([System.Diagnostics.Process]$Process)
 
-if ($pyProcess.HasExited) {
-    Write-Host "       Python 启动失败! 请检查 $root\app.py" -ForegroundColor Red
-    Write-Host "       尝试在终端手动运行: cd $root && python app.py" -ForegroundColor DarkYellow
-    Stop-Process -Id $nodeProcess.Id -Force -ErrorAction SilentlyContinue
-    exit 1
+    Write-Section 4 5 "打开数字人页面"
+
+    $Url = "http://localhost:$AvatarPort/?display&v=$([DateTimeOffset]::Now.ToUnixTimeSeconds())"
+    Start-Process `
+        -FilePath "msedge" `
+        -ArgumentList @(
+            "--new-window",
+            "--kiosk",
+            $Url,
+            "--edge-kiosk-type=fullscreen",
+            "--autoplay-policy=no-user-gesture-required"
+        ) | Out-Null
+
+    Write-Status "浏览器" "OK" $Url "Green"
+    $Ready = Wait-HttpJson `
+        -Uri "http://localhost:$AvatarPort/avatar-ready" `
+        -TimeoutSeconds 120 `
+        -Ready { param($Response) return [bool]$Response.ready }
+
+    if ($null -eq $Ready) {
+        Stop-ProcessQuietly -ProcessId $Process.Id
+        throw "数字人模型未加载完成，系统不会打开摄像头。"
+    }
+
+    Write-Status "Live2D" "OK" "模型已加载: $($Ready.model)" "Green"
+    return $Url
 }
-Write-Host "       人脸识别引擎已启动 (PID: $($pyProcess.Id))" -ForegroundColor Green
 
-Write-Host ""
-Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  系统运行中!" -ForegroundColor Green
-Write-Host "========================================" -ForegroundColor Cyan
-Write-Host ""
-Write-Host "  数字人页面: $url" -ForegroundColor White
-Write-Host "  运行日志:   $logDir" -ForegroundColor DarkGray
-Write-Host "  退出全屏:   按 F11" -ForegroundColor DarkGray
-Write-Host "  关闭浏览器:  Alt+F4" -ForegroundColor DarkGray
-Write-Host "  停止系统:    关闭此窗口" -ForegroundColor DarkGray
-Write-Host ""
+function Start-FaceRecognition {
+    param([hashtable]$Logs)
 
-try {
+    Write-Section 5 5 "启动人脸识别引擎"
+
+    $OldProcesses = Get-CimInstance Win32_Process |
+        Where-Object { $_.CommandLine -match '(^| )app\.py( |$)' }
+
+    foreach ($OldProcess in $OldProcesses) {
+        Write-Status "Python" "STOP" "清理旧进程 PID=$($OldProcess.ProcessId)" "DarkYellow"
+        Stop-ProcessQuietly -ProcessId $OldProcess.ProcessId
+    }
+
+    if ($OldProcesses) {
+        Start-Sleep -Seconds 1
+    }
+
+    $PythonExe = Join-Path $RootDir ".venv\Scripts\python.exe"
+    if (-not (Test-Path -LiteralPath $PythonExe)) {
+        $PythonExe = "python"
+    }
+
+    $Process = Start-Process `
+        -FilePath $PythonExe `
+        -ArgumentList @("app.py") `
+        -WorkingDirectory $RootDir `
+        -PassThru `
+        -WindowStyle Hidden `
+        -RedirectStandardOutput $Logs.PyOut `
+        -RedirectStandardError $Logs.PyErr
+
+    Start-Sleep -Seconds 4
+    if ($Process.HasExited) {
+        throw "Python 启动失败，请检查 $RootDir\app.py 和日志 $($Logs.PyErr)"
+    }
+
+    Write-Status "Python" "OK" "人脸识别引擎已启动 PID=$($Process.Id)" "Green"
+    return $Process
+}
+
+function Show-RunningInfo {
+    param([string]$Url)
+
+    Write-Host ""
+    Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host "  系统运行中!" -ForegroundColor Green
+    Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  数字人页面: $Url" -ForegroundColor White
+    Write-Host "  运行日志:   $LogDir" -ForegroundColor DarkGray
+    Write-Host "  退出全屏:   按 F11" -ForegroundColor DarkGray
+    Write-Host "  关闭浏览器: Alt+F4" -ForegroundColor DarkGray
+    Write-Host "  停止系统:   关闭此窗口" -ForegroundColor DarkGray
+    Write-Host ""
+}
+
+function Watch-Processes {
+    param(
+        [System.Diagnostics.Process]$Node,
+        [System.Diagnostics.Process]$Python
+    )
+
     while ($true) {
-        if ($nodeProcess.HasExited) {
-            Write-Host "数字人前端已退出" -ForegroundColor Red
+        if ($Node.HasExited) {
+            Write-Status "Node" "EXIT" "数字人前端已退出" "Red"
             break
         }
-        if ($pyProcess -and $pyProcess.HasExited) {
-            Write-Host "人脸识别引擎已退出" -ForegroundColor Red
+        if ($Python.HasExited) {
+            Write-Status "Python" "EXIT" "人脸识别引擎已退出" "Red"
             break
         }
         Start-Sleep -Seconds 3
     }
 }
+
+$Script:ExitEventSubscriber = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
+    $NodePid = [Environment]::GetEnvironmentVariable('CV_NODE_PID')
+    $PythonPid = [Environment]::GetEnvironmentVariable('CV_PYTHON_PID')
+    if ($NodePid) { Stop-Process -Id $NodePid -ErrorAction SilentlyContinue }
+    if ($PythonPid) { Stop-Process -Id $PythonPid -ErrorAction SilentlyContinue }
+}
+
+Write-Banner
+Import-DotEnv (Join-Path $RootDir ".env")
+$Logs = Initialize-Logs
+
+try {
+    $DatabaseState = Initialize-Databases
+    Clear-TestDataIfRequested -DatabaseState $DatabaseState
+    $NodeProcess = Start-AvatarServer -Logs $Logs
+    [Environment]::SetEnvironmentVariable('CV_NODE_PID', $NodeProcess.Id, 'Process')
+    Wait-TtsPrewarmIfEnabled -Process $NodeProcess
+    $AvatarUrl = Open-AvatarBrowserAndWait -Process $NodeProcess
+    $PythonProcess = Start-FaceRecognition -Logs $Logs
+    [Environment]::SetEnvironmentVariable('CV_PYTHON_PID', $PythonProcess.Id, 'Process')
+    Show-RunningInfo -Url $AvatarUrl
+    Watch-Processes -Node $NodeProcess -Python $PythonProcess
+}
+catch {
+    Write-Host ""
+    Write-Status "启动" "FAIL" $_.Exception.Message "Red"
+    exit 1
+}
 finally {
-    Write-Host "正在停止服务..." -ForegroundColor Yellow
-    Stop-Process -Id $nodeProcess.Id -Force -ErrorAction SilentlyContinue
-    if ($pyProcess) {
-        Stop-Process -Id $pyProcess.Id -Force -ErrorAction SilentlyContinue
+    if ($Script:ExitEventSubscriber) {
+        Unregister-Event -SourceIdentifier PowerShell.Exiting -ErrorAction SilentlyContinue
     }
-    Write-Host "已停止" -ForegroundColor Green
+    Stop-System
+    [Environment]::SetEnvironmentVariable('CV_NODE_PID', $null, 'Process')
+    [Environment]::SetEnvironmentVariable('CV_PYTHON_PID', $null, 'Process')
 }

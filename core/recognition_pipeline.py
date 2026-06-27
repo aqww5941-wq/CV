@@ -17,6 +17,7 @@ from config import (
 )
 from core.attendance_db import AttendanceDB
 from core.checkin import CheckInTracker
+from core.embedding_matcher import EmbeddingMatcher
 from core.events import EventBus
 from core.face_utils import is_complete_face_for_stranger
 from core.recognition_cache import RecognitionCache
@@ -62,6 +63,7 @@ class RecognitionPipeline:
         self.recognizer = recognizer
         self.tracker = tracker
         self.db_embeddings = db_embeddings
+        self.matcher = EmbeddingMatcher(db_embeddings)
         self.attendance_db = attendance_db
         self.checkin_tracker = checkin_tracker
         self.vote_buffer = vote_buffer
@@ -83,6 +85,7 @@ class RecognitionPipeline:
 
     def update_embeddings(self, db_embeddings: list) -> None:
         self.db_embeddings = db_embeddings
+        self.matcher.update(db_embeddings)
 
     def shutdown(self) -> None:
         self.attendance_executor.shutdown(wait=False, cancel_futures=True)
@@ -162,7 +165,7 @@ class RecognitionPipeline:
         if name is not None:
             return name, float(similarity or 0.0)
 
-        name, similarity = self.recognizer.match(embedding, self.db_embeddings)
+        name, similarity = self.matcher.match(embedding)
         if name is not None:
             self.rec_cache.set(track_id, name, similarity)
         return name, float(similarity or 0.0)
