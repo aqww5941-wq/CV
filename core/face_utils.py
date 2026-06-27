@@ -14,6 +14,9 @@ from config import (
     FACE_MIN_MATCH_SIZE,
     STRANGER_EDGE_MARGIN,
     STRANGER_MIN_FACE_SIZE,
+    UNKNOWN_ENROLL_MAX_POSE_IMBALANCE,
+    UNKNOWN_ENROLL_MIN_DET_SCORE,
+    UNKNOWN_ENROLL_MIN_FACE_SIZE,
 )
 
 
@@ -67,7 +70,38 @@ def check_face_quality(face: dict, frame_shape) -> FaceQuality:
     return FaceQuality(True, "")
 
 
-def _is_frontal_landmark_layout(kps) -> bool:
+def can_enroll_unknown_visitor(face: dict, frame_shape) -> bool:
+    bbox = face["bbox"]
+    h, w = frame_shape[:2]
+    x1, y1, x2, y2 = bbox
+    face_w = max(0, x2 - x1)
+    face_h = max(0, y2 - y1)
+
+    if min(face_w, face_h) < UNKNOWN_ENROLL_MIN_FACE_SIZE:
+        return False
+
+    if (
+        x1 < STRANGER_EDGE_MARGIN
+        or y1 < STRANGER_EDGE_MARGIN
+        or x2 > w - STRANGER_EDGE_MARGIN
+        or y2 > h - STRANGER_EDGE_MARGIN
+    ):
+        return False
+
+    if float(face.get("det_score") or 0.0) < UNKNOWN_ENROLL_MIN_DET_SCORE:
+        return False
+
+    kps = face.get("kps")
+    return kps is not None and _is_frontal_landmark_layout(
+        kps,
+        max_pose_imbalance=UNKNOWN_ENROLL_MAX_POSE_IMBALANCE,
+    )
+
+
+def _is_frontal_landmark_layout(
+    kps,
+    max_pose_imbalance: float = FACE_MAX_POSE_IMBALANCE,
+) -> bool:
     points = np.asarray(kps, dtype=np.float32)
     if points.shape[0] < 3:
         return True
@@ -81,4 +115,4 @@ def _is_frontal_landmark_layout(kps) -> bool:
 
     eye_mid_x = float((left_eye[0] + right_eye[0]) / 2.0)
     pose_imbalance = abs(float(nose[0]) - eye_mid_x) / eye_distance
-    return pose_imbalance <= FACE_MAX_POSE_IMBALANCE
+    return pose_imbalance <= max_pose_imbalance

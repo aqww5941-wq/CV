@@ -257,7 +257,17 @@ class Live2DController(threading.Thread):
 class EmotionDecisionModule:
     """Converts face events into Live2D actions and key-event speech."""
 
-    SPEECH_EVENTS = {"check_in", "check_out", "repeat", "first_time", "returning", "stranger", "idle_long", "crowd"}
+    SPEECH_EVENTS = {
+        "check_in",
+        "check_out",
+        "repeat",
+        "first_time",
+        "returning",
+        "stranger",
+        "returning_stranger",
+        "idle_long",
+        "crowd",
+    }
     SILENT_ACTIONS = {"attention"}
 
     def __init__(self, tts_queue: queue.Queue, live2d: Live2DController):
@@ -277,7 +287,7 @@ class EmotionDecisionModule:
         if speech_type not in self.SPEECH_EVENTS:
             return
 
-        name = payload.get("name", "访客")
+        name = payload.get("name") or payload.get("visitor_label") or "访客"
         text = self._pick_text(speech_type, name)
         if not text:
             return
@@ -300,6 +310,8 @@ class EmotionDecisionModule:
             return "first_time"
         if event_type == "check_in" and payload.get("is_returning"):
             return "returning"
+        if event_type == "stranger" and payload.get("is_returning"):
+            return "returning_stranger"
         return event_type
 
     def _pick_text(self, event_type: str, name: str) -> str:

@@ -46,6 +46,7 @@ class FaceTracker:
                 "det_score": t["det_score"],
                 "kps": t.get("kps"),
                 "track_id": t["track_id"],
+                "fresh_detection": t.get("fresh_detection", False),
             }
             for t in self._tracks
             if t["lost_frames"] == 0
@@ -72,6 +73,7 @@ class FaceTracker:
                 best_track["det_score"] = det["det_score"]
                 best_track["kps"] = det.get("kps")
                 best_track["lost_frames"] = 0
+                best_track["fresh_detection"] = True
                 best_track["tracker"] = self._init_cv_tracker(frame, det_bbox)
                 matched_track_ids.add(best_track["track_id"])
             else:
@@ -84,6 +86,7 @@ class FaceTracker:
                         "det_score": det["det_score"],
                         "kps": det.get("kps"),
                         "lost_frames": 0,
+                        "fresh_detection": True,
                         "tracker": self._init_cv_tracker(frame, det_bbox),
                     }
                 )
@@ -97,6 +100,7 @@ class FaceTracker:
     def _track_frame(self, frame) -> None:
         h, w = frame.shape[:2]
         for track in self._tracks:
+            track["fresh_detection"] = False
             tracker = track.get("tracker")
             if tracker is None:
                 if not self._tracker_warning_logged:

@@ -147,28 +147,29 @@ class VectorDB:
             cur.close()
         return [(r[0], float(r[1])) for r in rows if float(r[1]) >= MATCH_THRESHOLD]
 
-    def get_all_grouped(self) -> list[tuple[str, np.ndarray]]:
+    @staticmethod
+    def _to_normalized_array(embedding) -> np.ndarray:
+        if isinstance(embedding, str):
+            arr = np.fromstring(embedding.strip("[]"), sep=",", dtype=np.float32)
+        elif isinstance(embedding, list):
+            arr = np.array(embedding, dtype=np.float32)
+        else:
+            arr = np.array(embedding, dtype=np.float32)
+        norm = np.linalg.norm(arr)
+        if norm > 0:
+            arr = arr / norm
+        return arr
+
+    def get_all_embeddings(self) -> list[tuple[str, np.ndarray]]:
         with self._connection() as conn:
             cur = conn.cursor()
             cur.execute(
-                f"SELECT employee_name, AVG(embedding::vector)::vector "
-                f"FROM {TABLE_NAME} GROUP BY employee_name"
+                f"SELECT employee_name, embedding "
+                f"FROM {TABLE_NAME} ORDER BY employee_name, id"
             )
             rows = cur.fetchall()
             cur.close()
-        result = []
-        for name, emb in rows:
-            if isinstance(emb, str):
-                arr = np.fromstring(emb.strip("[]"), sep=",", dtype=np.float32)
-            elif isinstance(emb, list):
-                arr = np.array(emb, dtype=np.float32)
-            else:
-                arr = np.array(emb, dtype=np.float32)
-            norm = np.linalg.norm(arr)
-            if norm > 0:
-                arr = arr / norm
-            result.append((name, arr))
-        return result
+        return [(name, self._to_normalized_array(emb)) for name, emb in rows]
 
     def list_employees(self) -> list[str]:
         with self._connection() as conn:

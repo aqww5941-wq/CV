@@ -98,9 +98,18 @@ class EventBus:
         )
         self._avatar_event("check_out", {"name": name})
 
-    def stranger(self) -> None:
-        self.publish("stranger_detected", {"time": time.time()})
-        self._avatar_event("stranger", {})
+    def stranger(
+        self,
+        visitor_label: str | None = None,
+        is_returning: bool = False,
+    ) -> None:
+        payload = {
+            "time": time.time(),
+            "visitor_label": visitor_label or "未知访客",
+            "is_returning": is_returning,
+        }
+        self.publish("stranger_detected", payload)
+        self._avatar_event("stranger", payload)
 
     def repeat_checkin(self, name: str) -> None:
         self.publish("repeat_checkin", {"name": name, "time": time.time()})

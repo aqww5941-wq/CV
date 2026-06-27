@@ -22,6 +22,7 @@ from core.recognition_cache import RecognitionCache
 from core.recognition_pipeline import RecognitionPipeline
 from core.redis_checkin import RedisCheckIn
 from core.tracker import FaceTracker
+from core.unknown_visitors import UnknownVisitorStore
 from core.vector_db import VectorDB
 from core.vote import VoteBuffer
 from core.voice_system import VoiceSystem
@@ -77,6 +78,10 @@ def _run_headless_loop(
         cap.release()
 
 
+def _embedding_person_count(embeddings) -> int:
+    return len({name for name, _ in embeddings})
+
+
 def main():
     logger.info("=" * 50)
     logger.info("AI 智慧前台数字人系统 (MVP Optimized)")
@@ -93,15 +98,27 @@ def main():
     try:
         vector_db = VectorDB()
         if len(vector_db) > 0:
-            pg_embeddings = vector_db.get_all_grouped()
-            logger.info("pgvector 底库: %d 人", len(pg_embeddings))
-            merged = dict(db_embeddings)
-            merged.update(pg_embeddings)
-            db_embeddings = list(merged.items())
-            logger.info("合并后底库: %d 人", len(db_embeddings))
+            pg_embeddings = vector_db.get_all_embeddings()
+            logger.info(
+                "pgvector 底库: %d 人 / %d 枚向量",
+                _embedding_person_count(pg_embeddings),
+                len(pg_embeddings),
+            )
+            pg_names = {name for name, _ in pg_embeddings}
+            db_embeddings = [
+                (name, emb) for name, emb in db_embeddings if name not in pg_names
+            ]
+            db_embeddings.extend(pg_embeddings)
+            logger.info(
+                "合并后底库: %d 人 / %d 枚向量",
+                _embedding_person_count(db_embeddings),
+                len(db_embeddings),
+            )
         else:
             logger.info(
-                "pgvector 为空, 使用 pickle 缓存底库: %d 人", len(db_embeddings)
+                "pgvector 为空, 使用 pickle 缓存底库: %d 人 / %d 枚向量",
+                _embedding_person_count(db_embeddings),
+                len(db_embeddings),
             )
     except Exception as e:
         logger.warning("pgvector 不可用, 降级为 pickle 缓存: %s", e)
@@ -114,6 +131,8 @@ def main():
 
     vote_buffer = VoteBuffer()
     rec_cache = RecognitionCache()
+    unknown_visitors = UnknownVisitorStore()
+    logger.info("未知访客记忆库: %d 人", len(unknown_visitors))
 
     cap = cv2.VideoCapture(CAMERA_INDEX)
     if not cap.isOpened():
@@ -134,6 +153,7 @@ def main():
         vote_buffer=vote_buffer,
         rec_cache=rec_cache,
         event_bus=event_bus,
+        unknown_visitors=unknown_visitors,
     )
 
     try:

@@ -14,15 +14,22 @@ from config import (
     CROWD_THRESHOLD,
     IDLE_LONG_THRESHOLD,
     REPEAT_FEEDBACK_COOLDOWN_SECONDS,
+    UNKNOWN_ENROLL_MAX_EMPLOYEE_SIMILARITY,
+    UNKNOWN_ENROLL_MIN_HITS,
     STRANGER_MIN_UNKNOWN_HITS,
 )
 from core.attendance_db import AttendanceDB
 from core.embedding_matcher import EmbeddingMatcher
 from core.events import EventBus
-from core.face_utils import check_face_quality, is_complete_face_for_stranger
+from core.face_utils import (
+    can_enroll_unknown_visitor,
+    check_face_quality,
+    is_complete_face_for_stranger,
+)
 from core.recognition_cache import RecognitionCache
 from core.recognizer import FaceRecognizer
 from core.tracker import FaceTracker
+from core.unknown_visitors import UnknownVisitorStore
 from core.vote import VoteBuffer
 
 logger = logging.getLogger(__name__)
@@ -51,6 +58,8 @@ class ProcessedFace:
     recognized: bool
     label: str
     checked_in_now: bool = False
+    unknown_visitor_id: str | None = None
+    returning_unknown: bool = False
 
 
 @dataclass
@@ -73,6 +82,7 @@ class RecognitionPipeline:
         vote_buffer: VoteBuffer,
         rec_cache: RecognitionCache,
         event_bus: EventBus,
+        unknown_visitors: UnknownVisitorStore,
     ):
         self.recognizer = recognizer
         self.tracker = tracker
@@ -83,6 +93,7 @@ class RecognitionPipeline:
         self.vote_buffer = vote_buffer
         self.rec_cache = rec_cache
         self.event_bus = event_bus
+        self.unknown_visitors = unknown_visitors
 
         self.last_face_time = 0.0
         self.idle_long_sent = False
@@ -178,26 +189,58 @@ class RecognitionPipeline:
                 label=quality.label,
             )
 
-        name, similarity = self._recognize(track_id, face["embedding"])
+        name, similarity, decision = self._recognize(track_id, face["embedding"])
         similarity = float(similarity or 0.0)
 
         if name is None:
-            return self._handle_unknown_face(bbox, track_id, similarity, frame_shape)
+            return self._handle_unknown_face(
+                face,
+                bbox,
+                track_id,
+                similarity,
+                frame_shape,
+            )
 
-        return self._handle_recognized_face(name, similarity, bbox, track_id, now)
+        return self._handle_recognized_face(
+            name,
+            similarity,
+            bbox,
+            track_id,
+            now,
+            decision,
+            face.get("fresh_detection", True),
+        )
 
-    def _recognize(self, track_id: int, embedding) -> tuple[str | None, float]:
-        name, similarity = self.rec_cache.get(track_id)
+    def _recognize(self, track_id: int, embedding) -> tuple[str | None, float, str]:
+        name, similarity = self.rec_cache.get_known(track_id)
         if name is not None:
-            return name, float(similarity or 0.0)
+            return name, float(similarity or 0.0), "accept"
 
-        name, similarity = self.matcher.match(embedding)
-        if name is not None:
-            self.rec_cache.set(track_id, name, similarity)
-        return name, float(similarity or 0.0)
+        known_miss_similarity = self.rec_cache.get_known_miss(track_id, embedding)
+        if known_miss_similarity is not None:
+            return None, known_miss_similarity, "reject"
+
+        candidate = self.matcher.match_candidate(embedding)
+        if candidate.decision == "accept" and candidate.name is not None:
+            self.rec_cache.set_known(
+                track_id,
+                candidate.name,
+                candidate.similarity,
+                embedding,
+            )
+        elif candidate.decision == "reject":
+            self.rec_cache.set_known_miss(track_id, candidate.similarity, embedding)
+        else:
+            logger.debug(
+                "识别进入复核区: %s sim=%.3f",
+                candidate.name,
+                candidate.similarity,
+            )
+        return candidate.name, float(candidate.similarity or 0.0), candidate.decision
 
     def _handle_unknown_face(
         self,
+        face: dict,
         bbox: list[int],
         track_id: int,
         similarity: float,
@@ -209,13 +252,49 @@ class RecognitionPipeline:
         else:
             self.unknown_hits[track_id] = 0
 
-        if (
+        visitor = None
+        can_enroll = self._can_enroll_unknown_visitor(
+            face,
+            frame_shape,
+            similarity,
+            track_id,
+        )
+
+        if can_enroll:
+            visitor = self.rec_cache.get_unknown(track_id, face["embedding"])
+            if visitor is None:
+                visitor = self.unknown_visitors.match_or_create(face["embedding"])
+                self.rec_cache.set_unknown(
+                    track_id,
+                    visitor.visitor_id,
+                    visitor.label,
+                    visitor.similarity,
+                    visitor.is_returning,
+                    face["embedding"],
+                )
+
+            if self.recognizer.should_log_stranger():
+                self.event_bus.stranger(
+                    visitor_label=visitor.label,
+                    is_returning=visitor.is_returning,
+                )
+                logger.info(
+                    "检测到%s: %s (sim=%.3f)",
+                    "回访未知访客" if visitor.is_returning else "新未知访客",
+                    visitor.label,
+                    visitor.similarity,
+                )
+        elif (
             complete_face
             and self.unknown_hits.get(track_id, 0) >= STRANGER_MIN_UNKNOWN_HITS
             and self.recognizer.should_log_stranger()
         ):
             self.event_bus.stranger()
-            logger.info("检测到未知访客")
+            logger.info(
+                "检测到未知访客但未入库: sim=%.3f, hits=%d",
+                similarity,
+                self.unknown_hits.get(track_id, 0),
+            )
 
         return ProcessedFace(
             bbox=bbox,
@@ -223,8 +302,31 @@ class RecognitionPipeline:
             name=None,
             similarity=similarity,
             recognized=False,
-            label="未知访客" if complete_face else "请正对摄像头",
+            label=self._unknown_label(visitor, complete_face),
+            unknown_visitor_id=visitor.visitor_id if visitor else None,
+            returning_unknown=visitor.is_returning if visitor else False,
         )
+
+    @staticmethod
+    def _unknown_label(visitor, complete_face: bool) -> str:
+        if visitor is None:
+            return "未知访客" if complete_face else "请正对摄像头"
+        if visitor.is_returning:
+            return f"{visitor.label} · 又见面"
+        return f"{visitor.label} · 初次记录"
+
+    def _can_enroll_unknown_visitor(
+        self,
+        face: dict,
+        frame_shape,
+        employee_similarity: float,
+        track_id: int,
+    ) -> bool:
+        if self.unknown_hits.get(track_id, 0) < UNKNOWN_ENROLL_MIN_HITS:
+            return False
+        if employee_similarity >= UNKNOWN_ENROLL_MAX_EMPLOYEE_SIMILARITY:
+            return False
+        return can_enroll_unknown_visitor(face, frame_shape)
 
     def _handle_recognized_face(
         self,
@@ -233,8 +335,32 @@ class RecognitionPipeline:
         bbox: list[int],
         track_id: int,
         now: float,
+        decision: str = "accept",
+        fresh_detection: bool = True,
     ) -> ProcessedFace:
         try:
+            vote_confirmed = False
+            if decision == "review":
+                if not fresh_detection:
+                    return self._face(
+                        bbox,
+                        track_id,
+                        name,
+                        similarity,
+                        f"确认中 · {name}",
+                    )
+                voted_name = self.vote_buffer.vote(track_id, name, similarity, now)
+                if voted_name is None:
+                    return self._face(
+                        bbox,
+                        track_id,
+                        name,
+                        similarity,
+                        f"确认中 · {name}",
+                    )
+                name = voted_name
+                vote_confirmed = True
+
             if not ALLOW_REPEAT_CHECKIN and self.checkin_tracker.is_checked_out_today(name):
                 return self._face(bbox, track_id, name, similarity, f"已签退 · {name}")
 
@@ -245,7 +371,11 @@ class RecognitionPipeline:
             if self._is_pending_checkin(name):
                 return self._face(bbox, track_id, name, similarity, f"签到中 · {name}")
 
-            voted_name = self.vote_buffer.vote(track_id, name, similarity, now)
+            voted_name = (
+                name
+                if vote_confirmed
+                else self.vote_buffer.vote(track_id, name, similarity, now)
+            )
             if voted_name is None:
                 return self._face(bbox, track_id, name, similarity, name)
 

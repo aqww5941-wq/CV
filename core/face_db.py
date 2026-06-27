@@ -6,7 +6,6 @@ import logging
 import os
 import pickle
 
-import numpy as np
 import cv2
 from insightface.app import FaceAnalysis
 
@@ -19,6 +18,7 @@ from config import (
 )
 
 logger = logging.getLogger(__name__)
+CACHE_VERSION = 2
 
 
 class FaceDatabase:
@@ -40,8 +40,9 @@ class FaceDatabase:
     def build(self, force: bool = False) -> None:
         if os.path.exists(CACHE_FILE) and not force:
             logger.info("发现缓存文件, 直接加载...")
-            self.load_cache()
-            return
+            if self.load_cache():
+                return
+            logger.info("人脸库缓存格式过旧, 将重建为多向量底库...")
         logger.info("开始扫描员工照片目录...")
         app = self._get_app()
         self.embeddings = []
@@ -60,18 +61,20 @@ class FaceDatabase:
                 emb = self._extract_embedding(app, img_path)
                 if emb is not None:
                     embeddings_for_person.append(emb)
+                    self.embeddings.append((employee_name, emb))
                     logger.info("  提取特征: %s / %s", employee_name, filename)
             if embeddings_for_person:
-                avg_embedding = np.mean(embeddings_for_person, axis=0)
-                avg_embedding = avg_embedding / np.linalg.norm(avg_embedding)
-                self.embeddings.append((employee_name, avg_embedding))
                 logger.info(
-                    "-> %s: 使用 %d 张照片, 特征维度 %d",
+                    "-> %s: 保留 %d 枚照片特征, 特征维度 %d",
                     employee_name,
                     len(embeddings_for_person),
-                    avg_embedding.shape[0],
+                    embeddings_for_person[0].shape[0],
                 )
-        logger.info("人脸库建立完成, 共 %d 人", len(self.embeddings))
+        logger.info(
+            "人脸库建立完成, 共 %d 人 / %d 枚向量",
+            len({name for name, _ in self.embeddings}),
+            len(self.embeddings),
+        )
         self._save_cache()
 
     def _extract_embedding(self, app: FaceAnalysis, img_path: str) -> np.ndarray | None:
@@ -88,13 +91,24 @@ class FaceDatabase:
     def _save_cache(self) -> None:
         os.makedirs(os.path.dirname(CACHE_FILE), exist_ok=True)
         with open(CACHE_FILE, "wb") as f:
-            pickle.dump(self.embeddings, f)
+            pickle.dump(
+                {"version": CACHE_VERSION, "embeddings": self.embeddings},
+                f,
+            )
         logger.info("人脸库已缓存到: %s", CACHE_FILE)
 
-    def load_cache(self) -> None:
+    def load_cache(self) -> bool:
         with open(CACHE_FILE, "rb") as f:
-            self.embeddings = pickle.load(f)
-        logger.info("从缓存加载人脸库成功, 共 %d 人", len(self.embeddings))
+            payload = pickle.load(f)
+        if not isinstance(payload, dict) or payload.get("version") != CACHE_VERSION:
+            return False
+        self.embeddings = payload.get("embeddings", [])
+        logger.info(
+            "从缓存加载人脸库成功, 共 %d 人 / %d 枚向量",
+            len({name for name, _ in self.embeddings}),
+            len(self.embeddings),
+        )
+        return True
 
     def get_all(self) -> list[tuple[str, np.ndarray]]:
         return self.embeddings
