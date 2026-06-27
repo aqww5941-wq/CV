@@ -34,8 +34,11 @@ DEBOUNCE_SECONDS = 5
 # 签到冷却时间 (秒): 同一个人签到后, 此时间内不再签到
 CHECKIN_COOLDOWN_SECONDS = 600
 
+# 已签到人员持续出现在镜头前时，数字人重复反馈的最小间隔
+REPEAT_FEEDBACK_COOLDOWN_SECONDS = 15
+
 # 是否启用 OpenCV 实时预览窗口。False 时仍会读取摄像头并后台识别。
-ENABLE_GUI = True
+ENABLE_GUI = False
 
 # 测试模式: True = 允许重复打卡 (关闭每日去重和防抖)
 ALLOW_REPEAT_CHECKIN = False
@@ -86,8 +89,26 @@ MQ_TOPIC_PREFIX = "attendance"
 # ── 数字人前端 ──
 AVATAR_SERVER_URL = "http://localhost:3456"
 
+# ── 语音队列与缓存 ──
+TTS_VOICE = os.getenv("TTS_VOICE", "zh-CN-XiaoxiaoNeural")
+TTS_VOICE_BY_MODEL = {
+    "epsilon": os.getenv("TTS_VOICE_EPSILON", "zh-CN-XiaoyiNeural"),
+    "chitose": os.getenv("TTS_VOICE_CHITOSE", "zh-CN-YunxiNeural"),
+    "haruGreeter": os.getenv("TTS_VOICE_HARU_GREETER", "zh-CN-XiaoyiNeural"),
+    "haru": os.getenv("TTS_VOICE_HARU", "zh-CN-XiaoxiaoNeural"),
+    "natori": os.getenv("TTS_VOICE_NATORI", "zh-TW-YunJheNeural"),
+}
+TTS_CACHE_DIR = os.path.join(CACHE_DIR, "tts")
+TTS_QUEUE_MAXSIZE = 32
+AUDIO_QUEUE_MAXSIZE = 16
+
 # 长时间无人阈值 (秒): 超过此时间触发 idle_long 事件
 IDLE_LONG_THRESHOLD = 60
 
 # 多人同时出现阈值 (人脸数): 超过此数量触发 crowd 事件
 CROWD_THRESHOLD = 3
+
+# 陌生人触发保护: 半脸/边缘脸/小脸不触发陌生人
+STRANGER_MIN_FACE_SIZE = 110
+STRANGER_EDGE_MARGIN = 24
+STRANGER_MIN_UNKNOWN_HITS = 3

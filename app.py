@@ -3,18 +3,14 @@
 import logging
 import sys
 import time
-from datetime import datetime
 
 import cv2
-import numpy as np
 
 from config import (
     CAMERA_INDEX,
     FRAME_WIDTH,
     FRAME_HEIGHT,
-    MATCH_THRESHOLD,
     ENABLE_GUI,
-    ALLOW_REPEAT_CHECKIN,
     DETECT_INTERVAL,
     VOTE_WINDOW,
 )
@@ -24,11 +20,12 @@ from core.events import EventBus
 from core.face_db import FaceDatabase
 from core.recognizer import FaceRecognizer
 from core.recognition_cache import RecognitionCache
+from core.recognition_pipeline import RecognitionPipeline
 from core.redis_checkin import RedisCheckIn
-from core.sound import play_tts, generate_edge_wavs
 from core.tracker import FaceTracker
 from core.vector_db import VectorDB
 from core.vote import VoteBuffer
+from core.voice_system import VoiceSystem
 from ui.render import (
     COLOR_CYAN,
     COLOR_GREEN,
@@ -63,18 +60,9 @@ def mouse_callback(event, x, y, flags, param):
 
 def _run_headless_loop(
     cap,
-    face_db,
-    db_embeddings,
-    recognizer,
-    tracker,
-    attendance_db,
+    pipeline,
     checkin_tracker,
-    vote_buffer,
-    rec_cache,
-    event_bus,
 ):
-    from config import IDLE_LONG_THRESHOLD, CROWD_THRESHOLD
-
     logger.info(
         "无界面模式启动 (ENABLE_GUI=False)，检测间隔=%d 帧，投票窗口=%d/%d 票，摄像头静默运行中...",
         DETECT_INTERVAL,
@@ -85,11 +73,6 @@ def _run_headless_loop(
     fps_start = time.time()
     fps_frames = 0
 
-    last_face_time: float = 0.0
-    idle_long_sent: bool = False
-    crowd_sent: bool = False
-    checked_in_today: set = set()
-
     try:
         while True:
             ret, frame = cap.read()
@@ -97,85 +80,8 @@ def _run_headless_loop(
                 break
 
             frame = cv2.flip(frame, 1)
-            faces = tracker.update(frame, recognizer)
-            active_ids = {face["track_id"] for face in faces}
-            vote_buffer.cleanup_inactive(active_ids)
-            rec_cache.cleanup(active_ids)
-
-            face_count = len(faces)
+            pipeline.process_frame(frame)
             now = time.time()
-
-            if face_count > 0:
-                if last_face_time == 0.0 or idle_long_sent:
-                    event_bus.attention()
-                    last_face_time = 0.0
-                idle_long_sent = False
-                last_face_time = now
-
-                if face_count >= CROWD_THRESHOLD and not crowd_sent:
-                    event_bus.crowd(face_count)
-                    crowd_sent = True
-                elif face_count < CROWD_THRESHOLD:
-                    crowd_sent = False
-            else:
-                if (
-                    last_face_time > 0
-                    and now - last_face_time > IDLE_LONG_THRESHOLD
-                    and not idle_long_sent
-                ):
-                    event_bus.idle_long()
-                    idle_long_sent = True
-
-            for face in faces:
-                embedding = face["embedding"]
-                track_id = face["track_id"]
-
-                name, similarity = rec_cache.get(track_id)
-                if name is None:
-                    name, similarity = recognizer.match(embedding, db_embeddings)
-                    if name is not None:
-                        rec_cache.set(track_id, name, similarity)
-
-                voted_name = vote_buffer.vote(track_id, name, similarity, now)
-
-                if voted_name is None:
-                    if name is None and recognizer.should_log_stranger():
-                        event_bus.stranger()
-                        logger.info("检测到未知访客")
-                    continue
-
-                if not ALLOW_REPEAT_CHECKIN:
-                    if checkin_tracker.is_checked_in_today(voted_name):
-                        if voted_name not in checked_in_today:
-                            event_bus.repeat_checkin(voted_name)
-                            checked_in_today.add(voted_name)
-                        continue
-                    if not checkin_tracker.can_checkin(voted_name, now):
-                        continue
-
-                is_first = not attendance_db.has_any_record(voted_name)
-                is_returning = not is_first and not attendance_db.has_record_today(
-                    voted_name, before_now=True
-                )
-
-                row_id = attendance_db.check_in(voted_name)
-                checkin_tracker.mark_checked_in(voted_name)
-                event_bus.checkin(
-                    voted_name,
-                    row_id,
-                    similarity,
-                    is_first=is_first,
-                    is_returning=is_returning,
-                )
-                play_tts("check_in", voted_name)
-                logger.info(
-                    "签到成功: %s (sim=%.3f, row=%s, first=%s, returning=%s)",
-                    voted_name,
-                    similarity,
-                    row_id,
-                    is_first,
-                    is_returning,
-                )
 
             fps_frames += 1
             if now - fps_start >= 10.0:
@@ -198,13 +104,8 @@ def _run_gui_loop(
     cap,
     face_db,
     db_embeddings,
-    recognizer,
-    tracker,
-    attendance_db,
+    pipeline,
     checkin_tracker,
-    vote_buffer,
-    rec_cache,
-    event_bus,
 ):
     global button_clicked, last_recognized_name, last_recognized_bbox, button_rect
 
@@ -228,7 +129,7 @@ def _run_gui_loop(
                 break
 
             frame = cv2.flip(frame, 1)
-            faces = tracker.update(frame, recognizer)
+            result = pipeline.process_frame(frame)
             h, w = frame.shape[:2]
 
             last_recognized_name = ""
@@ -239,21 +140,9 @@ def _run_gui_loop(
             cv2.addWeighted(overlay_bar, 0.4, frame, 0.6, 0, frame)
             cv2.line(frame, (0, 55), (w, 55), COLOR_CYAN, 1, lineType=cv2.LINE_AA)
 
-            active_ids = {face["track_id"] for face in faces}
-            vote_buffer.cleanup_inactive(active_ids)
-            rec_cache.cleanup(active_ids)
-
-            for face in faces:
-                bbox = face["bbox"]
-                embedding = face["embedding"]
-                track_id = face["track_id"]
-
-                name, similarity = rec_cache.get(track_id)
-                if name is None:
-                    name, similarity = recognizer.match(embedding, db_embeddings)
-                    if name is not None:
-                        rec_cache.set(track_id, name, similarity)
-                recognized = name is not None
+            for face in result.faces:
+                bbox = face.bbox
+                recognized = face.recognized
 
                 x1, y1, x2, y2 = bbox
                 color = COLOR_GREEN if recognized else COLOR_RED
@@ -261,55 +150,9 @@ def _run_gui_loop(
                 draw_tech_bounding_box(frame, bbox, color, thickness=3, length=18)
 
                 if recognized:
-                    last_recognized_name = name
+                    last_recognized_name = face.name or ""
                     last_recognized_bbox = bbox
-
-                    if (
-                        not ALLOW_REPEAT_CHECKIN
-                        and checkin_tracker.is_checked_out_today(name)
-                    ):
-                        label = f"已签退 · {name}"
-                    elif (
-                        not ALLOW_REPEAT_CHECKIN
-                        and checkin_tracker.is_checked_in_today(name)
-                    ):
-                        label = f"已签到 · {name}"
-                    else:
-                        label = name
-                        voted_name = vote_buffer.vote(
-                            track_id, name, similarity, time.time()
-                        )
-                        if voted_name is not None:
-                            if (
-                                not ALLOW_REPEAT_CHECKIN
-                                and not checkin_tracker.can_checkin(
-                                    voted_name, time.time()
-                                )
-                            ):
-                                pass
-                            else:
-                                is_first = not attendance_db.has_any_record(voted_name)
-                                is_returning = (
-                                    not is_first
-                                    and not attendance_db.has_record_today(
-                                        voted_name, before_now=True
-                                    )
-                                )
-                                row_id = attendance_db.check_in(voted_name)
-                                checkin_tracker.mark_checked_in(voted_name)
-                                event_bus.checkin(
-                                    voted_name,
-                                    row_id,
-                                    similarity,
-                                    is_first=is_first,
-                                    is_returning=is_returning,
-                                )
-                                play_tts("check_in", voted_name)
-                                welcome_text = f"欢迎回来, {voted_name}! 签到成功"
-                                welcome_until = time.time() + 3.0
-                                label = f"已签到 · {voted_name}"
-                else:
-                    label = "未知访客"
+                label = face.label
 
                 _, _, tw, th = text_bbox(label, 16)
                 pad_x, pad_y = 10, 6
@@ -336,6 +179,10 @@ def _run_gui_loop(
                     }
                 )
 
+            if result.checked_in_names:
+                welcome_text = f"欢迎回来, {result.checked_in_names[-1]}! 签到成功"
+                welcome_until = time.time() + 3.0
+
             if button_clicked:
                 button_clicked = False
                 if last_recognized_name and checkin_tracker.is_checked_out_today(
@@ -346,12 +193,9 @@ def _run_gui_loop(
                 elif last_recognized_name and checkin_tracker.is_checked_in_today(
                     last_recognized_name
                 ):
-                    duration = attendance_db.check_out(last_recognized_name)
-                    checkin_tracker.reset_checkin(last_recognized_name)
-                    event_bus.checkout(last_recognized_name, 0, duration)
-                    play_tts("check_out", last_recognized_name)
+                    duration = pipeline.checkout(last_recognized_name)
                     toast_text = (
-                        f"【签退】{last_recognized_name} 成功，今日工作 {duration} 分钟"
+                        f"【签退】{last_recognized_name} 成功，今日工作 {duration or 0} 分钟"
                     )
                     toast_until = time.time() + 3.5
                 elif last_recognized_name:
@@ -467,6 +311,7 @@ def _run_gui_loop(
             elif key == ord("r") or key == ord("R"):
                 face_db.build(force=True)
                 db_embeddings = face_db.get_all()
+                pipeline.update_embeddings(db_embeddings)
 
     except KeyboardInterrupt:
         pass
@@ -504,25 +349,19 @@ def main():
     recognizer = FaceRecognizer()
     recognizer.init_model()
 
-    logger.info("正在生成 Edge TTS 语音 (首次较慢, 后续使用缓存)...")
-    generate_edge_wavs()
-
     tracker = FaceTracker(detect_interval=DETECT_INTERVAL)
 
     attendance_db = AttendanceDB()
     checkin_tracker = CheckInTracker()
     checkin_tracker.cleanup()
-    vote_buffer = VoteBuffer()
-    rec_cache = RecognitionCache()
-    event_bus = EventBus()
-
-    redis_checkin = None
     try:
-        redis_checkin = RedisCheckIn()
-        checkin_tracker = redis_checkin
+        checkin_tracker = RedisCheckIn()
         logger.info("签到去重: Redis")
     except Exception as e:
         logger.warning("Redis 不可用, 降级为 JSON 文件去重: %s", e)
+
+    vote_buffer = VoteBuffer()
+    rec_cache = RecognitionCache()
 
     cap = cv2.VideoCapture(CAMERA_INDEX)
     if not cap.isOpened():
@@ -531,32 +370,38 @@ def main():
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
 
-    if ENABLE_GUI:
-        _run_gui_loop(
-            cap,
-            face_db,
-            db_embeddings,
-            recognizer,
-            tracker,
-            attendance_db,
-            checkin_tracker,
-            vote_buffer,
-            rec_cache,
-            event_bus,
-        )
-    else:
-        _run_headless_loop(
-            cap,
-            face_db,
-            db_embeddings,
-            recognizer,
-            tracker,
-            attendance_db,
-            checkin_tracker,
-            vote_buffer,
-            rec_cache,
-            event_bus,
-        )
+    voice_system = VoiceSystem()
+    voice_system.start()
+    event_bus = EventBus(emotion_module=voice_system.emotion)
+    pipeline = RecognitionPipeline(
+        recognizer=recognizer,
+        tracker=tracker,
+        db_embeddings=db_embeddings,
+        attendance_db=attendance_db,
+        checkin_tracker=checkin_tracker,
+        vote_buffer=vote_buffer,
+        rec_cache=rec_cache,
+        event_bus=event_bus,
+    )
+
+    try:
+        if ENABLE_GUI:
+            _run_gui_loop(
+                cap,
+                face_db,
+                db_embeddings,
+                pipeline,
+                checkin_tracker,
+            )
+        else:
+            _run_headless_loop(
+                cap,
+                pipeline,
+                checkin_tracker,
+            )
+    finally:
+        pipeline.shutdown()
+        voice_system.stop()
 
 
 if __name__ == "__main__":

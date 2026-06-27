@@ -3,10 +3,9 @@
 import json
 import logging
 import time
-import urllib.request
 from datetime import datetime
 
-from config import MQ_BACKEND, MQ_TOPIC_PREFIX, AVATAR_SERVER_URL
+from config import MQ_BACKEND, MQ_TOPIC_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -14,9 +13,9 @@ logger = logging.getLogger(__name__)
 class EventBus:
     """事件总线: 支持 Redis Pub/Sub + HTTP 推送到数字人前端"""
 
-    def __init__(self):
+    def __init__(self, emotion_module=None):
         self._backend = self._init_backend()
-        self._avatar_url = f"{AVATAR_SERVER_URL}/event"
+        self._emotion_module = emotion_module
         self._last_avatar_event: dict | None = None
         self._last_avatar_time: float = 0.0
 
@@ -59,18 +58,6 @@ class EventBus:
             logger.warning("未知 MQ 后端 %s, 事件总线降级为日志模式", MQ_BACKEND)
             return None
 
-    def _send_to_avatar(self, event: dict) -> None:
-        try:
-            data = json.dumps(event, ensure_ascii=False).encode("utf-8")
-            req = urllib.request.Request(
-                self._avatar_url,
-                data=data,
-                headers={"Content-Type": "application/json"},
-            )
-            urllib.request.urlopen(req, timeout=2)
-        except Exception:
-            pass
-
     def publish(self, event_type: str, payload: dict) -> None:
         topic = f"{MQ_TOPIC_PREFIX}.{event_type}"
         message = {
@@ -93,7 +80,8 @@ class EventBus:
         msg = {"type": event_type, **payload}
         self._last_avatar_event = msg
         self._last_avatar_time = time.time()
-        self._send_to_avatar(msg)
+        if self._emotion_module is not None:
+            self._emotion_module.on_avatar_event(event_type, payload)
 
     def checkin(
         self,

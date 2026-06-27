@@ -2,6 +2,14 @@
 
 VOICE = "zh-CN-XiaoxiaoNeural"
 
+VOICE_BY_MODEL = {
+    "epsilon": "zh-CN-XiaoxiaoNeural",
+    "chitose": "zh-CN-YunxiNeural",
+    "haruGreeter": "zh-CN-XiaoxiaoNeural",
+    "haru": "zh-CN-XiaoxiaoNeural",
+    "natori": "zh-CN-YunjianNeural",
+}
+
 TTS_TEXTS = {
     "check_in": [
         "{}，早上好呀～今天也要元气满满地开始哦！",
@@ -28,6 +36,8 @@ TTS_TEXTS = {
         "{}，你是不是太喜欢我了呀～又来了呢！",
         "{}，你今天已经签到过啦，我有认真记住哦！",
         "{}，重复签到不用担心，记录已经在啦！",
+        "{}，我看到你啦～今天已经签到成功了哦！",
+        "{}，不用再打卡啦，站在这里陪我一会儿也可以～",
     ],
     "first_time": [
         "{}，初次见面～我是你的专属小助手哦！",
