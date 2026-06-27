@@ -29,6 +29,8 @@ class FaceRecognizer:
         self._last_stranger_log: float = 0.0
 
     def init_model(self) -> None:
+        if self._app is not None:
+            return
         logger.info("正在初始化 InsightFace 模型 (首次运行会下载模型, 请耐心等待)...")
         self._app = FaceAnalysis(
             name=INSIGHTFACE_MODEL,
@@ -37,10 +39,14 @@ class FaceRecognizer:
         self._app.prepare(ctx_id=0, det_thresh=DETECTION_THRESHOLD)
         logger.info("模型初始化完成 (providers=%s)", INSIGHTFACE_PROVIDERS)
 
-    def detect(self, frame: np.ndarray) -> list[dict]:
+    @property
+    def app(self) -> FaceAnalysis:
         if self._app is None:
             raise RuntimeError("模型未初始化, 请先调用 init_model()")
-        faces = self._app.get(frame)
+        return self._app
+
+    def detect(self, frame: np.ndarray) -> list[dict]:
+        faces = self.app.get(frame)
         results = []
         for face in faces:
             bbox = face.bbox.astype(int).tolist()
@@ -49,6 +55,9 @@ class FaceRecognizer:
                     "bbox": bbox,
                     "embedding": face.normed_embedding,
                     "det_score": float(face.det_score),
+                    "kps": face.kps.astype(float).tolist()
+                    if getattr(face, "kps", None) is not None
+                    else None,
                 }
             )
         return results

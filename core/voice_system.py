@@ -41,6 +41,7 @@ class AudioJob:
     path: str
     event_type: str
     name: str = ""
+    text: str = ""
 
 
 @dataclass(frozen=True)
@@ -156,7 +157,14 @@ class TTSWorkerThread(threading.Thread):
                     logger.info("Edge TTS generated: %s -> %s", request.text, path)
                 else:
                     logger.debug("TTS cache hit: %s", request.text)
-                self.audio_queue.put(AudioJob(path=path, event_type=request.event_type, name=request.name))
+                self.audio_queue.put(
+                    AudioJob(
+                        path=path,
+                        event_type=request.event_type,
+                        name=request.name,
+                        text=request.text,
+                    )
+                )
             except Exception as exc:
                 logger.warning("TTS request skipped (%s): %s", request.event_type, exc)
             finally:
@@ -166,9 +174,10 @@ class TTSWorkerThread(threading.Thread):
 class AudioPlayerThread(threading.Thread):
     """Serial audio playback worker. Face recognition never waits on it."""
 
-    def __init__(self, audio_queue: queue.Queue):
+    def __init__(self, audio_queue: queue.Queue, live2d: Live2DController | None = None):
         super().__init__(name="AudioPlayerThread", daemon=True)
         self.audio_queue = audio_queue
+        self.live2d = live2d
         self._stop_event = threading.Event()
 
     def stop(self) -> None:
@@ -185,9 +194,20 @@ class AudioPlayerThread(threading.Thread):
                 break
             try:
                 pygame.mixer.music.load(job.path)
+                if self.live2d is not None and job.text:
+                    self.live2d.enqueue(
+                        "speech",
+                        {
+                            "event_type": job.event_type,
+                            "name": job.name,
+                            "text": job.text,
+                        },
+                    )
                 pygame.mixer.music.play()
                 while pygame.mixer.music.get_busy() and not self._stop_event.is_set():
                     time.sleep(0.02)
+                if self.live2d is not None and job.text:
+                    self.live2d.enqueue("speech_end", {"event_type": job.event_type})
             except Exception as exc:
                 logger.warning("Audio playback failed (%s): %s", job.path, exc)
             finally:
@@ -319,7 +339,7 @@ class VoiceSystem:
         self.live2d = Live2DController()
         self.emotion = EmotionDecisionModule(self.tts_queue, self.live2d)
         self.tts_worker = TTSWorkerThread(self.tts_queue, self.audio_queue, self.cache, self.tts_client)
-        self.audio_player = AudioPlayerThread(self.audio_queue)
+        self.audio_player = AudioPlayerThread(self.audio_queue, live2d=self.live2d)
 
     def start(self) -> None:
         self.live2d.start()

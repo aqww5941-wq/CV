@@ -941,6 +941,15 @@
     function handleEvent(msg) {
         clearIdleTimer();
         switch (msg.type) {
+            case 'speech':
+                if (msg.text) {
+                    showStatus(msg.text);
+                    showSubtitle(msg.text);
+                }
+                break;
+            case 'speech_end':
+                hideSubtitle(900);
+                break;
             case 'check_in':
                 if (msg.is_first) {
                     runBehavior('greet', { name: msg.name || '访客', silent: true, status: (msg.name || '访客') + ' 首次签到' });
@@ -957,7 +966,7 @@
                 runBehavior('stranger', { name: '', silent: true, status: '检测到陌生人' });
                 break;
             case 'repeat':
-                runBehavior('repeat', { name: msg.name || '访客', silent: true, status: (msg.name || '访客') + ' 今天已签到' });
+                runBehavior('repeat', { name: msg.name || '访客', silent: true, status: (msg.name || '访客') + ' 又来打招呼啦' });
                 break;
             case 'attention':
                 if (idleState === 'idle') {

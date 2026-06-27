@@ -24,12 +24,13 @@ logger = logging.getLogger(__name__)
 class FaceDatabase:
     """本地人脸特征库"""
 
-    def __init__(self):
+    def __init__(self, app: FaceAnalysis | None = None):
         self.embeddings: list[tuple[str, np.ndarray]] = []
-        self._app = None
+        self._app = app
 
     def _get_app(self) -> FaceAnalysis:
         if self._app is None:
+            logger.info("正在初始化 InsightFace 模型用于构建人脸库...")
             self._app = FaceAnalysis(
                 name=INSIGHTFACE_MODEL, providers=INSIGHTFACE_PROVIDERS
             )

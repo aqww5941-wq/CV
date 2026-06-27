@@ -325,7 +325,10 @@ def main():
     logger.info("AI 智慧前台数字人系统 (MVP Optimized)")
     logger.info("=" * 50)
 
-    face_db = FaceDatabase()
+    recognizer = FaceRecognizer()
+    recognizer.init_model()
+
+    face_db = FaceDatabase(app=recognizer.app)
     face_db.build()
     db_embeddings = face_db.get_all()
 
@@ -345,9 +348,6 @@ def main():
             )
     except Exception as e:
         logger.warning("pgvector 不可用, 降级为 pickle 缓存: %s", e)
-
-    recognizer = FaceRecognizer()
-    recognizer.init_model()
 
     tracker = FaceTracker(detect_interval=DETECT_INTERVAL)
 

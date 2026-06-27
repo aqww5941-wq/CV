@@ -19,7 +19,7 @@ from core.attendance_db import AttendanceDB
 from core.checkin import CheckInTracker
 from core.embedding_matcher import EmbeddingMatcher
 from core.events import EventBus
-from core.face_utils import is_complete_face_for_stranger
+from core.face_utils import check_face_quality, is_complete_face_for_stranger
 from core.recognition_cache import RecognitionCache
 from core.recognizer import FaceRecognizer
 from core.tracker import FaceTracker
@@ -152,6 +152,18 @@ class RecognitionPipeline:
     def _process_face(self, face: dict, frame_shape, now: float) -> ProcessedFace:
         bbox = face["bbox"]
         track_id = face["track_id"]
+        quality = check_face_quality(face, frame_shape)
+        if not quality.passed:
+            self.unknown_hits[track_id] = 0
+            return ProcessedFace(
+                bbox=bbox,
+                track_id=track_id,
+                name=None,
+                similarity=0.0,
+                recognized=False,
+                label=quality.label,
+            )
+
         name, similarity = self._recognize(track_id, face["embedding"])
         similarity = float(similarity or 0.0)
 

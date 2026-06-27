@@ -86,6 +86,28 @@ function Import-DotEnv {
     Write-Status ".env" "OK" "已加载 $Path" "Green"
 }
 
+function Get-EnvValue {
+    param(
+        [string]$Name,
+        [string]$Default = ""
+    )
+
+    $Value = [Environment]::GetEnvironmentVariable($Name, "Process")
+    if ($null -eq $Value -or $Value -eq "") {
+        return $Default
+    }
+    return $Value
+}
+
+function ConvertTo-BashSingleQuoted {
+    param([string]$Value)
+
+    if ($null -eq $Value) {
+        $Value = ""
+    }
+    return "'" + $Value.Replace("'", "'\''") + "'"
+}
+
 function Read-YesNo {
     param(
         [string]$Prompt,
@@ -312,9 +334,13 @@ done
 
     if ($DatabaseState.MySQL) {
         try {
+            $MySqlUser = Get-EnvValue "MYSQL_USER" "root"
+            $MySqlPassword = Get-EnvValue "MYSQL_PASSWORD" ""
+            $MySqlDatabase = Get-EnvValue "MYSQL_DATABASE" "attendance"
+            $MySqlDatabaseIdentifier = $MySqlDatabase.Replace("``", "````")
             $MySqlCleanSql = @'
-CREATE DATABASE IF NOT EXISTS attendance;
-USE attendance;
+CREATE DATABASE IF NOT EXISTS `__MYSQL_DATABASE__`;
+USE `__MYSQL_DATABASE__`;
 CREATE TABLE IF NOT EXISTS attendance (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
@@ -325,13 +351,16 @@ CREATE TABLE IF NOT EXISTS attendance (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 TRUNCATE TABLE attendance;
 '@
+            $MySqlCleanSql = $MySqlCleanSql.Replace("__MYSQL_DATABASE__", $MySqlDatabaseIdentifier)
             if ($DatabaseState.HasWsl) {
-                $BashCmd = "MYSQL_PWD='123456' mysql -u root <<'EOSQL'`n$MySqlCleanSql`nEOSQL"
+                $BashUser = ConvertTo-BashSingleQuoted $MySqlUser
+                $BashPassword = ConvertTo-BashSingleQuoted $MySqlPassword
+                $BashCmd = "MYSQL_PWD=$BashPassword mysql -u $BashUser <<'EOSQL'`n$MySqlCleanSql`nEOSQL"
                 $MySqlOutput = & wsl.exe -e bash -lc $BashCmd 2>&1
             }
             else {
-                $env:MYSQL_PWD = "123456"
-                $MySqlOutput = & mysql -u root -e $MySqlCleanSql 2>&1
+                $env:MYSQL_PWD = $MySqlPassword
+                $MySqlOutput = & mysql -u $MySqlUser -e $MySqlCleanSql 2>&1
                 Remove-Item Env:\MYSQL_PWD -ErrorAction SilentlyContinue
             }
 
