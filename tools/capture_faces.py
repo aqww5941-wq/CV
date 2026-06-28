@@ -4,10 +4,8 @@ from __future__ import annotations
 from config import (
     AVATAR_SERVER_URL,
     EMPLOYEES_DIR,
-    INSIGHTFACE_PROVIDERS,
-    INSIGHTFACE_MODEL,
-    DETECTION_THRESHOLD,
 )
+from core.insightface_factory import create_face_analysis
 from core.vector_db import VectorDB
 
 import logging
@@ -156,10 +154,7 @@ def main():
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
-    from insightface.app import FaceAnalysis
-
-    app = FaceAnalysis(name=INSIGHTFACE_MODEL, providers=INSIGHTFACE_PROVIDERS)
-    app.prepare(ctx_id=0, det_thresh=DETECTION_THRESHOLD)
+    app = create_face_analysis()
     logger.info("模型就绪")
 
     photos: list[tuple[np.ndarray, str, str]] = []

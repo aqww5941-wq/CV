@@ -16,12 +16,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import (
     CACHE_FILE,
-    DETECTION_THRESHOLD,
     EMPLOYEES_DIR,
-    INSIGHTFACE_MODEL,
-    INSIGHTFACE_PROVIDERS,
 )
 from core.attendance_db import AttendanceDB
+from core.insightface_factory import create_face_analysis
 from core.vector_db import VectorDB
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
@@ -71,10 +69,7 @@ def enroll_from_payload(payload: dict) -> dict:
     if missing:
         raise FileNotFoundError("missing photos: " + ", ".join(missing[:5]))
 
-    from insightface.app import FaceAnalysis
-
-    app = FaceAnalysis(name=INSIGHTFACE_MODEL, providers=INSIGHTFACE_PROVIDERS)
-    app.prepare(ctx_id=0, det_thresh=DETECTION_THRESHOLD)
+    app = create_face_analysis()
 
     employee_dir = Path(EMPLOYEES_DIR) / name
     employee_dir.mkdir(parents=True, exist_ok=True)

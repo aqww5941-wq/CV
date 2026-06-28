@@ -13,10 +13,8 @@ from insightface.app import FaceAnalysis
 from config import (
     EMPLOYEES_DIR,
     CACHE_FILE,
-    INSIGHTFACE_MODEL,
-    DETECTION_THRESHOLD,
-    INSIGHTFACE_PROVIDERS,
 )
+from core.insightface_factory import create_face_analysis
 
 logger = logging.getLogger(__name__)
 CACHE_VERSION = 2
@@ -32,10 +30,7 @@ class FaceDatabase:
     def _get_app(self) -> FaceAnalysis:
         if self._app is None:
             logger.info("正在初始化 InsightFace 模型用于构建人脸库...")
-            self._app = FaceAnalysis(
-                name=INSIGHTFACE_MODEL, providers=INSIGHTFACE_PROVIDERS
-            )
-            self._app.prepare(ctx_id=0, det_thresh=DETECTION_THRESHOLD)
+            self._app = create_face_analysis()
         return self._app
 
     def build(self, force: bool = False) -> None:

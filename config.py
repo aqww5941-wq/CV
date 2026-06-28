@@ -1,6 +1,7 @@
 """项目全局配置"""
 
 import os
+import re
 
 from core.env_loader import load_dotenv
 
@@ -28,6 +29,19 @@ def _get_float(name: str, default: float) -> float:
     return float(value)
 
 
+def _get_int_pair(name: str, default: tuple[int, int]) -> tuple[int, int]:
+    value = os.getenv(name)
+    if value is None or value.strip() == "":
+        return default
+    parts = [part for part in re.split(r"[xX,;\s]+", value.strip()) if part]
+    if len(parts) != 2:
+        raise ValueError(f"{name} must contain width and height, for example 640x640")
+    width, height = (int(parts[0]), int(parts[1]))
+    if width <= 0 or height <= 0:
+        raise ValueError(f"{name} must be positive, got {width}x{height}")
+    return width, height
+
+
 # 项目根目录
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -40,6 +54,10 @@ CACHE_FILE = os.path.join(CACHE_DIR, "face_db.pkl")
 
 # InsightFace 模型名称 (buffalo_l 精度高, buffalo_sc 速度快)
 INSIGHTFACE_MODEL = os.getenv("INSIGHTFACE_MODEL", "buffalo_l")
+
+# InsightFace 检测输入尺寸，独立于摄像头采集分辨率。
+# 480x480 速度优先，640x640 平衡，800x800+ 更适合远距离小脸。
+INSIGHTFACE_DET_SIZE = _get_int_pair("INSIGHTFACE_DET_SIZE", (640, 640))
 
 # GPU 加速: True 使用 CUDA, False 使用 CPU
 USE_GPU = _get_bool("USE_GPU", False)

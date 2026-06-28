@@ -10,11 +10,11 @@ import numpy as np
 from insightface.app import FaceAnalysis
 
 from config import (
-    INSIGHTFACE_MODEL,
-    DETECTION_THRESHOLD,
     DEBOUNCE_SECONDS,
+    INSIGHTFACE_DET_SIZE,
     INSIGHTFACE_PROVIDERS,
 )
+from core.insightface_factory import create_face_analysis
 
 logger = logging.getLogger(__name__)
 
@@ -31,12 +31,12 @@ class FaceRecognizer:
         if self._app is not None:
             return
         logger.info("正在初始化 InsightFace 模型 (首次运行会下载模型, 请耐心等待)...")
-        self._app = FaceAnalysis(
-            name=INSIGHTFACE_MODEL,
-            providers=INSIGHTFACE_PROVIDERS,
+        self._app = create_face_analysis()
+        logger.info(
+            "模型初始化完成 (providers=%s, det_size=%s)",
+            INSIGHTFACE_PROVIDERS,
+            INSIGHTFACE_DET_SIZE,
         )
-        self._app.prepare(ctx_id=0, det_thresh=DETECTION_THRESHOLD)
-        logger.info("模型初始化完成 (providers=%s)", INSIGHTFACE_PROVIDERS)
 
     @property
     def app(self) -> FaceAnalysis:
