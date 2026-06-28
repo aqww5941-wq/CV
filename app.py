@@ -6,10 +6,12 @@ import time
 
 import cv2
 
+from core.async_pipeline import AsyncPipelineWrapper
 from config import (
     CAMERA_INDEX,
     FRAME_WIDTH,
     FRAME_HEIGHT,
+    CAMERA_BUFFER_SIZE,
     ENABLE_GUI,
     DETECT_INTERVAL,
     VOTE_WINDOW,
@@ -51,6 +53,9 @@ def _run_headless_loop(
     fps_start = time.time()
     fps_frames = 0
 
+    async_pipeline = AsyncPipelineWrapper(pipeline)
+    async_pipeline.start()
+
     try:
         while True:
             ret, frame = cap.read()
@@ -58,7 +63,7 @@ def _run_headless_loop(
                 break
 
             frame = cv2.flip(frame, 1)
-            pipeline.process_frame(frame)
+            async_pipeline.submit_frame(frame)
             now = time.time()
 
             fps_frames += 1
@@ -75,6 +80,7 @@ def _run_headless_loop(
     except KeyboardInterrupt:
         logger.info("收到退出信号")
     finally:
+        async_pipeline.stop()
         cap.release()
 
 
@@ -140,6 +146,7 @@ def main():
         sys.exit(1)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, CAMERA_BUFFER_SIZE)
 
     voice_system = VoiceSystem()
     voice_system.start()

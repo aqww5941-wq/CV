@@ -89,7 +89,7 @@ CHECKIN_COOLDOWN_SECONDS = _get_int("CHECKIN_COOLDOWN_SECONDS", 600)
 REPEAT_FEEDBACK_COOLDOWN_SECONDS = _get_int("REPEAT_FEEDBACK_COOLDOWN_SECONDS", 15)
 
 # 是否启用 OpenCV 实时预览窗口。False 时仍会读取摄像头并后台识别。
-ENABLE_GUI = _get_bool("ENABLE_GUI", False)
+ENABLE_GUI = _get_bool("ENABLE_GUI", True)
 
 # 测试模式: True = 允许重复打卡 (关闭每日去重和防抖)
 ALLOW_REPEAT_CHECKIN = _get_bool("ALLOW_REPEAT_CHECKIN", False)
@@ -100,6 +100,7 @@ CAMERA_INDEX = _get_int("CAMERA_INDEX", 0)
 # 摄像头分辨率
 FRAME_WIDTH = _get_int("FRAME_WIDTH", 1280)
 FRAME_HEIGHT = _get_int("FRAME_HEIGHT", 720)
+CAMERA_BUFFER_SIZE = _get_int("CAMERA_BUFFER_SIZE", 1)
 
 # 检测间隔 (帧): 每 N 帧做一次完整检测, 其余帧走跟踪缓存
 # 30 FPS 下 DETECT_INTERVAL=15 约每秒检测 2 次, CPU 降低 80%+
@@ -107,6 +108,10 @@ DETECT_INTERVAL = _get_int("DETECT_INTERVAL", 15)
 
 # 检测置信度阈值
 DETECTION_THRESHOLD = _get_float("DETECTION_THRESHOLD", 0.5)
+
+# 单帧最多进入识别/签到业务处理的人脸数。
+# 多人场景按人脸框面积优先、离画面中心距离其次排序，背景小脸不进入业务流程。
+MAX_PROCESS_FACES = _get_int("MAX_PROCESS_FACES", 3)
 
 # 识别质量门槛: 低质量脸只提示，不进入身份匹配/签到
 FACE_MIN_MATCH_SIZE = _get_int("FACE_MIN_MATCH_SIZE", 96)

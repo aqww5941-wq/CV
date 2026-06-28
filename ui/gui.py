@@ -6,6 +6,7 @@ import time
 
 import cv2
 
+from core.async_pipeline import AsyncPipelineWrapper
 from ui.render import (
     COLOR_CYAN,
     COLOR_DARK_BAR,
@@ -33,6 +34,7 @@ class OpenCVGuiLoop:
         self.face_db = face_db
         self.db_embeddings = db_embeddings
         self.pipeline = pipeline
+        self.async_pipeline = AsyncPipelineWrapper(pipeline)
         self.checkin_tracker = checkin_tracker
         self.button_rect = [0, 0, 0, 0]
         self.button_clicked = False
@@ -52,6 +54,8 @@ class OpenCVGuiLoop:
         fps_frames = 0
         fps_display = ""
 
+        self.async_pipeline.start()
+
         try:
             while True:
                 ret, frame = self.cap.read()
@@ -59,18 +63,22 @@ class OpenCVGuiLoop:
                     break
 
                 frame = cv2.flip(frame, 1)
-                result = self.pipeline.process_frame(frame)
+                self.async_pipeline.submit_frame(frame.copy())
+                result = self.async_pipeline.get_result()
                 h, w = frame.shape[:2]
 
                 self.last_recognized_name = ""
                 text_draws: list[dict] = []
 
                 self._draw_top_bar(frame, w)
-                self._draw_faces(frame, result.faces, text_draws)
+                if result is not None:
+                    self._draw_faces(frame, result.faces, text_draws)
 
-                if result.checked_in_names:
-                    welcome_text = f"欢迎回来, {result.checked_in_names[-1]}! 签到成功"
-                    welcome_until = time.time() + 3.0
+                    if result.checked_in_names:
+                        welcome_text = (
+                            f"欢迎回来, {result.checked_in_names[-1]}! 签到成功"
+                        )
+                        welcome_until = time.time() + 3.0
 
                 if self.button_clicked:
                     self.button_clicked = False
@@ -104,6 +112,7 @@ class OpenCVGuiLoop:
         except KeyboardInterrupt:
             pass
         finally:
+            self.async_pipeline.stop()
             self.cap.release()
             cv2.destroyAllWindows()
 
@@ -171,7 +180,10 @@ class OpenCVGuiLoop:
             return f"{name} 今日已签退，无需重复操作", time.time() + 2.5
         if name and self.checkin_tracker.is_checked_in_today(name):
             duration = self.pipeline.checkout(name)
-            return f"【签退】{name} 成功，今日工作 {duration or 0} 分钟", time.time() + 3.5
+            return (
+                f"【签退】{name} 成功，今日工作 {duration or 0} 分钟",
+                time.time() + 3.5,
+            )
         if name:
             return f"提示: {name} 今日尚未打卡上班", time.time() + 2.5
         return "识别对焦中...请正对摄像头后点击", time.time() + 2.5

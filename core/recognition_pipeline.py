@@ -13,6 +13,7 @@ from config import (
     ALLOW_REPEAT_CHECKIN,
     CROWD_THRESHOLD,
     IDLE_LONG_THRESHOLD,
+    MAX_PROCESS_FACES,
     REPEAT_FEEDBACK_COOLDOWN_SECONDS,
     UNKNOWN_ENROLL_MAX_EMPLOYEE_SIMILARITY,
     UNKNOWN_ENROLL_MIN_HITS,
@@ -127,7 +128,7 @@ class RecognitionPipeline:
         processed: list[ProcessedFace] = []
         checked_in_names: list[str] = []
 
-        for face in faces:
+        for face in self._select_business_faces(faces, frame.shape):
             item = self._process_face(face, frame.shape, now)
             processed.append(item)
             if item.checked_in_now and item.name:
@@ -138,6 +139,27 @@ class RecognitionPipeline:
             face_count=len(faces),
             checked_in_names=checked_in_names,
         )
+
+    @staticmethod
+    def _select_business_faces(faces: list[dict], frame_shape) -> list[dict]:
+        if MAX_PROCESS_FACES <= 0 or len(faces) <= MAX_PROCESS_FACES:
+            return faces
+
+        frame_h, frame_w = frame_shape[:2]
+        frame_cx = frame_w / 2.0
+        frame_cy = frame_h / 2.0
+
+        def priority(face: dict) -> tuple[int, float]:
+            x1, y1, x2, y2 = face["bbox"]
+            width = max(0, x2 - x1)
+            height = max(0, y2 - y1)
+            area = width * height
+            cx = (x1 + x2) / 2.0
+            cy = (y1 + y2) / 2.0
+            center_distance = ((cx - frame_cx) ** 2 + (cy - frame_cy) ** 2) ** 0.5
+            return (-area, center_distance)
+
+        return sorted(faces, key=priority)[:MAX_PROCESS_FACES]
 
     def checkout(self, name: str) -> int | None:
         with self.attendance_lock:
@@ -247,9 +269,10 @@ class RecognitionPipeline:
         frame_shape,
     ) -> ProcessedFace:
         complete_face = is_complete_face_for_stranger(bbox, frame_shape)
-        if complete_face:
+        fresh_detection = face.get("fresh_detection", True)
+        if complete_face and fresh_detection:
             self.unknown_hits[track_id] = self.unknown_hits.get(track_id, 0) + 1
-        else:
+        elif not complete_face:
             self.unknown_hits[track_id] = 0
 
         visitor = None
@@ -260,7 +283,7 @@ class RecognitionPipeline:
             track_id,
         )
 
-        if can_enroll:
+        if can_enroll and fresh_detection:
             visitor = self.rec_cache.get_unknown(track_id, face["embedding"])
             if visitor is None:
                 visitor = self.unknown_visitors.match_or_create(face["embedding"])
@@ -286,6 +309,7 @@ class RecognitionPipeline:
                 )
         elif (
             complete_face
+            and fresh_detection
             and self.unknown_hits.get(track_id, 0) >= STRANGER_MIN_UNKNOWN_HITS
             and self.recognizer.should_log_stranger()
         ):
@@ -296,13 +320,18 @@ class RecognitionPipeline:
                 self.unknown_hits.get(track_id, 0),
             )
 
+        if complete_face and not fresh_detection:
+            label = "识别中"
+        else:
+            label = self._unknown_label(visitor, complete_face)
+
         return ProcessedFace(
             bbox=bbox,
             track_id=track_id,
             name=None,
             similarity=similarity,
             recognized=False,
-            label=self._unknown_label(visitor, complete_face),
+            label=label,
             unknown_visitor_id=visitor.visitor_id if visitor else None,
             returning_unknown=visitor.is_returning if visitor else False,
         )

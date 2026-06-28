@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from collections import defaultdict
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -28,6 +28,7 @@ class EmbeddingMatcher:
     def __init__(self, embeddings: list[tuple[str, np.ndarray]] | None = None):
         self.names: list[str] = []
         self.matrix = np.empty((0, 0), dtype=np.float32)
+        self.person_indices: dict[str, np.ndarray] = {}
         if embeddings is not None:
             self.update(embeddings)
 
@@ -35,12 +36,20 @@ class EmbeddingMatcher:
         self.names = [name for name, _ in embeddings]
         if not embeddings:
             self.matrix = np.empty((0, 0), dtype=np.float32)
+            self.person_indices = {}
             return
 
         matrix = np.asarray([embedding for _, embedding in embeddings], dtype=np.float32)
         norms = np.linalg.norm(matrix, axis=1, keepdims=True)
         norms[norms == 0] = 1.0
         self.matrix = matrix / norms
+        grouped_indices: dict[str, list[int]] = defaultdict(list)
+        for index, name in enumerate(self.names):
+            grouped_indices[name].append(index)
+        self.person_indices = {
+            name: np.asarray(indices, dtype=np.int64)
+            for name, indices in grouped_indices.items()
+        }
 
     def match_candidate(self, embedding: np.ndarray) -> MatchCandidate:
         name, similarity = self._best_person(embedding)
@@ -68,15 +77,17 @@ class EmbeddingMatcher:
             vector = vector / norm
 
         scores = self.matrix @ vector
-        per_person_scores: dict[str, list[float]] = defaultdict(list)
-        for name, score in zip(self.names, scores):
-            per_person_scores[name].append(float(score))
 
         best_name = None
         best_similarity = 0.0
         top_k = max(1, MATCH_PERSON_TOP_K)
-        for name, person_scores in per_person_scores.items():
-            top_scores = sorted(person_scores, reverse=True)[:top_k]
+        for name, indices in self.person_indices.items():
+            person_scores = scores[indices]
+            person_top_k = min(top_k, person_scores.size)
+            if person_top_k == person_scores.size:
+                top_scores = person_scores
+            else:
+                top_scores = np.partition(person_scores, -person_top_k)[-person_top_k:]
             similarity = float(np.mean(top_scores))
             if best_name is None or similarity > best_similarity:
                 best_name = name
