@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 from datetime import date
-from collections import defaultdict, deque
 from pathlib import Path
 import threading
 
@@ -13,7 +12,8 @@ from config import DAILY_TTS_TEXTS_FILE
 
 logger = logging.getLogger(__name__)
 _TEXTS_LOCK = threading.RLock()
-_RECENT_TEXTS: dict[str, deque[str]] = defaultdict(lambda: deque(maxlen=4))
+_TEXT_POOLS: dict[tuple[str, bool | None], list[str]] = {}
+_LAST_TEXTS: dict[tuple[str, bool | None], str] = {}
 
 EVENT_TYPES = {
     "check_in",
@@ -79,25 +79,46 @@ def refresh_texts(default_texts: dict[str, list[str]], target: dict[str, list[st
     with _TEXTS_LOCK:
         target.clear()
         target.update(merged)
-        _RECENT_TEXTS.clear()
+        _TEXT_POOLS.clear()
+        _LAST_TEXTS.clear()
 
 
-def choose_text(texts: dict[str, list[str]], event_type: str) -> str:
+def choose_text(
+    texts: dict[str, list[str]],
+    event_type: str,
+    require_placeholder: bool | None = None,
+) -> str:
     import random
 
     with _TEXTS_LOCK:
-        candidates = list(texts.get(event_type) or [])
-    if not candidates:
-        return ""
-    recent = _RECENT_TEXTS[event_type]
-    available = [text for text in candidates if text not in recent]
-    if not available:
-        last_text = recent[-1] if recent else None
-        available = [text for text in candidates if text != last_text] or candidates
-        recent.clear()
-    text = random.choice(available)
-    recent.append(text)
-    return text
+        candidates = _filter_candidates(texts.get(event_type) or [], require_placeholder)
+        if not candidates:
+            return ""
+
+        pool_key = (event_type, require_placeholder)
+        pool = _TEXT_POOLS.get(pool_key)
+        if not pool or any(item not in candidates for item in pool):
+            pool = _reshuffle(candidates, _LAST_TEXTS.get(pool_key), random)
+            _TEXT_POOLS[pool_key] = pool
+
+        text = pool.pop()
+        _LAST_TEXTS[pool_key] = text
+        return text
+
+
+def _filter_candidates(values: list[str], require_placeholder: bool | None) -> list[str]:
+    candidates = list(dict.fromkeys(values))
+    if require_placeholder is None:
+        return candidates
+    return [text for text in candidates if ("{}" in text) == require_placeholder]
+
+
+def _reshuffle(candidates: list[str], last_text: str | None, random_module) -> list[str]:
+    pool = list(candidates)
+    random_module.shuffle(pool)
+    if len(pool) > 1 and pool[-1] == last_text:
+        pool.insert(0, pool.pop())
+    return pool
 
 
 def _normalize_template(value: str) -> str:

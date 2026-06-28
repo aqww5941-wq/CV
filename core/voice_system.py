@@ -328,30 +328,23 @@ class EmotionDecisionModule:
         return event_type
 
     def _pick_text(self, event_type: str, name: str) -> str:
-        text = choose_text(TTS_TEXTS, event_type)
+        include_name = self._should_include_name(event_type, name)
+        text = choose_text(TTS_TEXTS, event_type, require_placeholder=include_name)
+        if not text:
+            text = choose_text(TTS_TEXTS, event_type)
         if not text:
             return ""
-        if not self._should_include_name(event_type, name):
-            return self._format_without_name(text)
-        return text.format(name)
+        if "{}" not in text:
+            return text
+        if include_name:
+            return text.format(name)
+        return ""
 
     def _should_include_name(self, event_type: str, name: str) -> bool:
         if not name or name == "访客":
             return False
         probability = self.NAME_POLICY.get(event_type, 0.5)
         return random.random() < probability
-
-    @staticmethod
-    def _format_without_name(text: str) -> str:
-        return (
-            text.replace("{}，", "")
-            .replace("，{}", "")
-            .replace("{}呀", "")
-            .replace("{}啊", "")
-            .replace("{}", "")
-            .strip("，,。 ")
-            + "。"
-        )
 
     def _resolve_current_voice(self) -> str:
         now = time.time()

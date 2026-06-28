@@ -89,7 +89,7 @@ CHECKIN_COOLDOWN_SECONDS = _get_int("CHECKIN_COOLDOWN_SECONDS", 600)
 REPEAT_FEEDBACK_COOLDOWN_SECONDS = _get_int("REPEAT_FEEDBACK_COOLDOWN_SECONDS", 15)
 
 # 是否启用 OpenCV 实时预览窗口。False 时仍会读取摄像头并后台识别。
-ENABLE_GUI = _get_bool("ENABLE_GUI", True)
+ENABLE_GUI = _get_bool("ENABLE_GUI", False)
 
 # 测试模式: True = 允许重复打卡 (关闭每日去重和防抖)
 ALLOW_REPEAT_CHECKIN = _get_bool("ALLOW_REPEAT_CHECKIN", False)

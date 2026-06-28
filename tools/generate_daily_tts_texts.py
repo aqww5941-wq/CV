@@ -38,6 +38,18 @@ TEXT_COUNTS = {
     "crowd": 4,
 }
 
+NAME_PLACEHOLDER_COUNTS = {
+    "check_in": {"with_name": 6, "without_name": 2},
+    "repeat": {"with_name": 3, "without_name": 7},
+    "check_out": {"with_name": 4, "without_name": 2},
+    "stranger": {"with_name": 0, "without_name": 5},
+    "returning_stranger": {"with_name": 2, "without_name": 2},
+    "first_time": {"with_name": 3, "without_name": 1},
+    "returning": {"with_name": 2, "without_name": 2},
+    "idle_long": {"with_name": 0, "without_name": 4},
+    "crowd": {"with_name": 0, "without_name": 4},
+}
+
 WEEKDAY_NAMES = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
 SOLAR_FESTIVALS = {
     "01-01": "元旦",
@@ -75,6 +87,7 @@ def generate_daily_texts(
 ) -> Path:
     target_date = target_date or date.today()
     context = _build_date_context(target_date)
+    source = "model"
     try:
         texts = _generate_with_model(context)
     except Exception as exc:
@@ -82,11 +95,13 @@ def generate_daily_texts(
             raise
         print(f"模型生成失败，使用本地兜底语录: {exc}", file=sys.stderr)
         texts = _fallback_texts(context)
+        source = "local-fallback"
 
     payload = {
         "date": target_date.isoformat(),
         "generated_at": datetime.now().isoformat(timespec="seconds"),
-        "model": DAILY_QUOTES_MODEL if DAILY_QUOTES_API_KEY else "local-fallback",
+        "source": source,
+        "model": DAILY_QUOTES_MODEL if source == "model" else "local-fallback",
         "context": context,
         "texts": _validate_texts(texts),
     }
@@ -177,6 +192,7 @@ def _generate_with_model(context: dict) -> dict[str, list[str]]:
 
 def _build_prompt(context: dict) -> str:
     counts = json.dumps(TEXT_COUNTS, ensure_ascii=False)
+    name_counts = json.dumps(NAME_PLACEHOLDER_COUNTS, ensure_ascii=False)
     hints = "；".join(context["hints"]) if context["hints"] else "普通工作日"
     return f"""
 请为公司前台数字人生成当天语音话术。
@@ -188,12 +204,13 @@ def _build_prompt(context: dict) -> str:
 要求:
 1. 输出 JSON，顶层字段为 texts。
 2. texts 下必须包含这些分类及数量: {counts}
-3. 需要温暖、自然、有一点轻松感；可以关心、调侃、幽默、问候，但不要油腻。
-4. 每句话尽量 8 到 28 个中文字符，适合 TTS 播放。
-5. 允许部分句子使用 {{name}} 占位，但不要每句话都用姓名。
-6. check_in/check_out/first_time 可以多带 {{name}}，repeat 只少量穿插姓名。
-7. stranger/idle_long/crowd 不要包含员工姓名。
-8. 不要涉及政治、宗教、医疗建议、投资建议，不要说“我是 AI”。
+3. 每个分类里带姓名和不带姓名的数量必须符合: {name_counts}
+4. 带姓名的句子只使用 {{name}} 作为姓名占位；不带姓名的句子绝对不要出现 {{name}}。
+5. 需要温暖、自然、有一点轻松感；可以关心、调侃、幽默、问候，但不要油腻。
+6. 每句话尽量 8 到 28 个中文字符，适合 TTS 播放，避免长句被截断。
+7. repeat 主要用不带姓名的轻量问候，少量穿插姓名即可。
+8. stranger/idle_long/crowd 必须全部不带姓名。
+9. 不要涉及政治、宗教、医疗建议、投资建议，不要说“我是 AI”。
 """.strip()
 
 
@@ -202,6 +219,7 @@ def _validate_texts(texts: dict) -> dict[str, list[str]]:
         raise ValueError("model output must be a JSON object")
 
     result: dict[str, list[str]] = {}
+    fallback = _fallback_texts({"hints": []})
     for event_type in sorted(EVENT_TYPES):
         values = texts.get(event_type) or []
         if not isinstance(values, list):
@@ -211,8 +229,8 @@ def _validate_texts(texts: dict) -> dict[str, list[str]]:
             text = _clean_text(str(value))
             if text:
                 cleaned.append(text)
-        if len(cleaned) < 2:
-            cleaned.extend(_fallback_texts({"hints": []})[event_type])
+        cleaned = _dedupe(cleaned)
+        cleaned = _balance_placeholders(event_type, cleaned, fallback[event_type])
         result[event_type] = cleaned[: TEXT_COUNTS.get(event_type, 4)]
     return result
 
@@ -225,6 +243,44 @@ def _clean_text(value: str) -> str:
     if any(bad in value for bad in ["政治", "宗教", "投资建议", "医疗建议"]):
         return ""
     return value
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    return list(dict.fromkeys(values))
+
+
+def _balance_placeholders(
+    event_type: str,
+    values: list[str],
+    fallback_values: list[str],
+) -> list[str]:
+    quota = NAME_PLACEHOLDER_COUNTS.get(event_type)
+    if not quota:
+        return values
+
+    with_name = [text for text in values if "{}" in text]
+    without_name = [text for text in values if "{}" not in text]
+    fallback_with_name = [text for text in fallback_values if "{}" in text]
+    fallback_without_name = [text for text in fallback_values if "{}" not in text]
+
+    with_target = quota["with_name"]
+    without_target = quota["without_name"]
+    with_name = _fill_to_count(with_name, fallback_with_name, with_target)
+    without_name = _fill_to_count(without_name, fallback_without_name, without_target)
+
+    balanced = with_name[:with_target] + without_name[:without_target]
+    random.shuffle(balanced)
+    return balanced
+
+
+def _fill_to_count(values: list[str], fallback_values: list[str], target_count: int) -> list[str]:
+    result = _dedupe(values)
+    for text in fallback_values:
+        if len(result) >= target_count:
+            break
+        if text not in result:
+            result.append(text)
+    return result
 
 
 def _extract_json(content: str) -> str:
@@ -246,42 +302,67 @@ def _fallback_texts(context: dict) -> dict[str, list[str]]:
             f"{{}}，{friday_hint}保持好心情呀。",
             "{}，早上好，今天也一起加油。",
             "{}，签到成功，元气已到账。",
+            "{}，打卡完成，今天顺顺利利。",
+            "{}，早呀，今天继续闪亮上班。",
+            f"{week_hint}早上好，今天也稳稳来。",
+            f"{friday_hint}签到成功，开心开工。",
         ],
         "repeat": [
             "{}，又见面啦，记得喝口水。",
             "{}，你今天状态持续在线。",
             "{}，别太累，休息也要认真。",
             f"{{}}，今日鼓励编号{salt}送达。",
+            "又见面啦，记得喝口水。",
+            "状态不错，继续保持节奏。",
+            "今天也辛苦啦，别忘了休息。",
+            "我还在这儿，继续认真待命。",
+            "路过也算打个招呼啦。",
+            f"今日鼓励编号{salt}送达。",
         ],
         "check_out": [
             "{}，辛苦啦，今天圆满收工。",
             "{}，签退完成，路上注意安全。",
             "{}，今天表现不错，早点休息。",
+            "{}，下班快乐，明天见。",
+            "签退完成，路上注意安全。",
+            "今天辛苦啦，回去好好放松。",
         ],
         "stranger": [
             "您好，欢迎来访，请稍等。",
             "新朋友你好，请到前台登记。",
             "欢迎光临，工作人员会协助您。",
+            "您好，请稍等工作人员确认。",
+            "欢迎来访，请先完成登记。",
         ],
         "returning_stranger": [
             "{}，又见面啦，欢迎回来。",
             "{}，我记得你来过，请稍等。",
+            "又见面啦，欢迎回来。",
+            "欢迎回来，请稍等一下。",
         ],
         "first_time": [
             "{}，初次见面，很高兴认识你。",
             "{}，欢迎加入，今天开始认识啦。",
+            "{}，第一次打卡成功，欢迎你。",
+            "初次见面，今天开始认识啦。",
         ],
         "returning": [
             "{}，欢迎回来，今天也顺顺利利。",
             "{}，好久不见，状态保持不错呀。",
+            "欢迎回来，今天也顺顺利利。",
+            "好久不见，今天状态不错呀。",
         ],
         "idle_long": [
             "现在有点安静，我继续待命。",
             "前台暂时安静，随时准备接待。",
+            "大厅很安静，我在这里守着。",
+            "没人经过的时候，也要精神在线。",
         ],
         "crowd": [
             "大家慢慢来，我一个个认真识别。",
             "今天好热闹，大家请有序通行。",
+            "人有点多，请大家稍微排队。",
+            "我正在认真识别，请稍等一下。",
         ],
     }
 
