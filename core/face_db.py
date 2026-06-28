@@ -7,6 +7,7 @@ import os
 import pickle
 
 import cv2
+import numpy as np
 from insightface.app import FaceAnalysis
 
 from config import (

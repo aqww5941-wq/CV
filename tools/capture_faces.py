@@ -1,6 +1,14 @@
 """人脸注册拍照工具: 正脸/左脸/右脸 各3张, 共9张, 录入 pgvector"""
 
 from __future__ import annotations
+from config import (
+    AVATAR_SERVER_URL,
+    EMPLOYEES_DIR,
+    INSIGHTFACE_PROVIDERS,
+    INSIGHTFACE_MODEL,
+    DETECTION_THRESHOLD,
+)
+from core.vector_db import VectorDB
 
 import logging
 import os
@@ -21,14 +29,7 @@ from core.env_loader import load_dotenv
 
 load_dotenv()
 
-from config import (
-    AVATAR_SERVER_URL,
-    EMPLOYEES_DIR,
-    INSIGHTFACE_PROVIDERS,
-    INSIGHTFACE_MODEL,
-    DETECTION_THRESHOLD,
-)
-from core.vector_db import VectorDB
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -169,7 +170,7 @@ def main():
     frame_idx = 0
     cached_faces: list = []
 
-    win_name = f"人脸注册"
+    win_name = "人脸注册"
     cv2.namedWindow(win_name, cv2.WINDOW_AUTOSIZE)
 
     try:
