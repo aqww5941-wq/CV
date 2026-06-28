@@ -17,6 +17,7 @@ from config import (
     VOTE_WINDOW,
 )
 from core.attendance_db import AttendanceDB
+from core.daily_quote_scheduler import DailyQuoteScheduler
 from core.events import EventBus
 from core.face_db import FaceDatabase
 from core.recognizer import FaceRecognizer
@@ -150,6 +151,8 @@ def main():
 
     voice_system = VoiceSystem()
     voice_system.start()
+    quote_scheduler = DailyQuoteScheduler(hour=6, minute=0)
+    quote_scheduler.start()
     event_bus = EventBus(emotion_module=voice_system.emotion)
     pipeline = RecognitionPipeline(
         recognizer=recognizer,
@@ -179,6 +182,7 @@ def main():
                 checkin_tracker,
             )
     finally:
+        quote_scheduler.stop()
         pipeline.shutdown()
         voice_system.stop()
 

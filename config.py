@@ -185,6 +185,20 @@ TTS_CACHE_DIR = os.path.join(CACHE_DIR, "tts")
 TTS_QUEUE_MAXSIZE = _get_int("TTS_QUEUE_MAXSIZE", 32)
 AUDIO_QUEUE_MAXSIZE = _get_int("AUDIO_QUEUE_MAXSIZE", 16)
 
+# ── 每日数字人语录生成 ──
+DAILY_TTS_TEXTS_FILE = os.getenv(
+    "DAILY_TTS_TEXTS_FILE",
+    os.path.join(CACHE_DIR, "daily_tts_texts.json"),
+)
+DAILY_QUOTES_MODEL = os.getenv("DAILY_QUOTES_MODEL", "qwen3.6-flash-2026-04-16")
+DAILY_QUOTES_API_BASE = os.getenv(
+    "DAILY_QUOTES_API_BASE",
+    "https://dashscope.aliyuncs.com/compatible-mode/v1",
+).rstrip("/")
+DAILY_QUOTES_API_KEY = os.getenv("DAILY_QUOTES_API_KEY", "")
+DAILY_QUOTES_TIMEOUT_SECONDS = _get_float("DAILY_QUOTES_TIMEOUT_SECONDS", 60.0)
+DAILY_QUOTES_TEMPERATURE = _get_float("DAILY_QUOTES_TEMPERATURE", 0.9)
+
 # 长时间无人阈值 (秒): 超过此时间触发 idle_long 事件
 IDLE_LONG_THRESHOLD = _get_int("IDLE_LONG_THRESHOLD", 60)
 

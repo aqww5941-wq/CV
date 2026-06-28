@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+import threading
 
 import numpy as np
 
@@ -29,27 +30,34 @@ class EmbeddingMatcher:
         self.names: list[str] = []
         self.matrix = np.empty((0, 0), dtype=np.float32)
         self.person_indices: dict[str, np.ndarray] = {}
+        self._lock = threading.RLock()
         if embeddings is not None:
             self.update(embeddings)
 
     def update(self, embeddings: list[tuple[str, np.ndarray]]) -> None:
-        self.names = [name for name, _ in embeddings]
+        names = [name for name, _ in embeddings]
         if not embeddings:
-            self.matrix = np.empty((0, 0), dtype=np.float32)
-            self.person_indices = {}
+            with self._lock:
+                self.names = []
+                self.matrix = np.empty((0, 0), dtype=np.float32)
+                self.person_indices = {}
             return
 
         matrix = np.asarray([embedding for _, embedding in embeddings], dtype=np.float32)
         norms = np.linalg.norm(matrix, axis=1, keepdims=True)
         norms[norms == 0] = 1.0
-        self.matrix = matrix / norms
+        normalized_matrix = matrix / norms
         grouped_indices: dict[str, list[int]] = defaultdict(list)
-        for index, name in enumerate(self.names):
+        for index, name in enumerate(names):
             grouped_indices[name].append(index)
-        self.person_indices = {
+        person_indices = {
             name: np.asarray(indices, dtype=np.int64)
             for name, indices in grouped_indices.items()
         }
+        with self._lock:
+            self.names = names
+            self.matrix = normalized_matrix
+            self.person_indices = person_indices
 
     def match_candidate(self, embedding: np.ndarray) -> MatchCandidate:
         name, similarity = self._best_person(embedding)
@@ -68,7 +76,11 @@ class EmbeddingMatcher:
         return candidate.name, candidate.similarity
 
     def _best_person(self, embedding: np.ndarray) -> tuple[str | None, float]:
-        if self.matrix.size == 0:
+        with self._lock:
+            matrix = self.matrix
+            person_indices = dict(self.person_indices)
+
+        if matrix.size == 0:
             return None, 0.0
 
         vector = np.asarray(embedding, dtype=np.float32)
@@ -76,12 +88,12 @@ class EmbeddingMatcher:
         if norm > 0:
             vector = vector / norm
 
-        scores = self.matrix @ vector
+        scores = matrix @ vector
 
         best_name = None
         best_similarity = 0.0
         top_k = max(1, MATCH_PERSON_TOP_K)
-        for name, indices in self.person_indices.items():
+        for name, indices in person_indices.items():
             person_scores = scores[indices]
             person_top_k = min(top_k, person_scores.size)
             if person_top_k == person_scores.size:
@@ -95,4 +107,5 @@ class EmbeddingMatcher:
         return best_name, best_similarity
 
     def __len__(self) -> int:
-        return len(self.names)
+        with self._lock:
+            return len(self.names)

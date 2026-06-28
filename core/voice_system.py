@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import queue
+import random
 import threading
 import time
 import urllib.request
@@ -23,6 +24,7 @@ from config import (
     TTS_VOICE,
     TTS_VOICE_BY_MODEL,
 )
+from core.daily_tts_texts import choose_text
 from core.tts_texts import TTS_TEXTS
 
 logger = logging.getLogger(__name__)
@@ -269,6 +271,17 @@ class EmotionDecisionModule:
         "crowd",
     }
     SILENT_ACTIONS = {"attention"}
+    NAME_POLICY = {
+        "check_in": 1.0,
+        "check_out": 1.0,
+        "first_time": 1.0,
+        "returning": 0.7,
+        "returning_stranger": 0.6,
+        "repeat": 0.35,
+        "stranger": 0.0,
+        "idle_long": 0.0,
+        "crowd": 0.0,
+    }
 
     def __init__(self, tts_queue: queue.Queue, live2d: Live2DController):
         self.tts_queue = tts_queue
@@ -315,12 +328,30 @@ class EmotionDecisionModule:
         return event_type
 
     def _pick_text(self, event_type: str, name: str) -> str:
-        import random
-
-        candidates = TTS_TEXTS.get(event_type)
-        if not candidates:
+        text = choose_text(TTS_TEXTS, event_type)
+        if not text:
             return ""
-        return random.choice(candidates).format(name)
+        if not self._should_include_name(event_type, name):
+            return self._format_without_name(text)
+        return text.format(name)
+
+    def _should_include_name(self, event_type: str, name: str) -> bool:
+        if not name or name == "访客":
+            return False
+        probability = self.NAME_POLICY.get(event_type, 0.5)
+        return random.random() < probability
+
+    @staticmethod
+    def _format_without_name(text: str) -> str:
+        return (
+            text.replace("{}，", "")
+            .replace("，{}", "")
+            .replace("{}呀", "")
+            .replace("{}啊", "")
+            .replace("{}", "")
+            .strip("，,。 ")
+            + "。"
+        )
 
     def _resolve_current_voice(self) -> str:
         now = time.time()

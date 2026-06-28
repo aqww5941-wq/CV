@@ -29,6 +29,11 @@ class EventBus:
                 password=REDIS_PASSWORD or None,
                 db=REDIS_DB,
                 decode_responses=True,
+                socket_connect_timeout=2,
+                socket_timeout=2,
+                socket_keepalive=True,
+                health_check_interval=30,
+                retry_on_timeout=True,
             )
             r.ping()
             logger.info("事件总线就绪: Redis Pub/Sub")
@@ -50,7 +55,14 @@ class EventBus:
                 "EVENT | %s | %s", topic, json.dumps(payload, ensure_ascii=False)
             )
         elif hasattr(self._backend, "publish"):
-            self._backend.publish(topic, json.dumps(message, ensure_ascii=False))
+            try:
+                self._backend.publish(topic, json.dumps(message, ensure_ascii=False))
+            except Exception as exc:
+                logger.warning("Redis 事件发布失败, 降级为日志模式: %s", exc)
+                self._backend = None
+                logger.info(
+                    "EVENT | %s | %s", topic, json.dumps(payload, ensure_ascii=False)
+                )
         logger.debug("EVENT | %s | %s", topic, payload.get("name", "?"))
 
     def _avatar_event(self, event_type: str, payload: dict) -> None:

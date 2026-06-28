@@ -118,7 +118,24 @@ class AttendanceDB:
                     duration    INT
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """)
+            self._ensure_index(
+                cur,
+                "idx_attendance_name_date",
+                "CREATE INDEX idx_attendance_name_date ON attendance (name, date)",
+            )
+            self._ensure_index(
+                cur,
+                "idx_attendance_open_checkout",
+                "CREATE INDEX idx_attendance_open_checkout "
+                "ON attendance (name, date, check_out, id)",
+            )
             cur.close()
+
+    @staticmethod
+    def _ensure_index(cur, index_name: str, create_sql: str) -> None:
+        cur.execute("SHOW INDEX FROM attendance WHERE Key_name=%s", (index_name,))
+        if cur.fetchone() is None:
+            cur.execute(create_sql)
 
     def check_in(self, name: str) -> int:
         today = date.today().isoformat()

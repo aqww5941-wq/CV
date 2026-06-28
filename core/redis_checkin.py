@@ -29,6 +29,11 @@ class RedisCheckIn:
             password=REDIS_PASSWORD or None,
             db=REDIS_DB,
             decode_responses=True,
+            socket_connect_timeout=2,
+            socket_timeout=2,
+            socket_keepalive=True,
+            health_check_interval=30,
+            retry_on_timeout=True,
         )
         try:
             self._r.ping()
@@ -96,7 +101,11 @@ class RedisCheckIn:
     def get_today_count(self) -> int:
         if self._r is None:
             return 0
-        return self._r.scard(self._today_set_key())
+        try:
+            return self._r.scard(self._today_set_key())
+        except Exception as exc:
+            logger.warning("Redis 今日签到人数读取失败: %s", exc)
+            return 0
 
     @staticmethod
     def _seconds_until_tomorrow() -> int:

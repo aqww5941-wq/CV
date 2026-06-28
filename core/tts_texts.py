@@ -2,8 +2,9 @@
 
 from config import TTS_VOICE as VOICE
 from config import TTS_VOICE_BY_MODEL as VOICE_BY_MODEL
+from core.daily_tts_texts import merge_daily_texts, refresh_texts
 
-TTS_TEXTS = {
+DEFAULT_TTS_TEXTS = {
     "check_in": [
         "{}，早上好呀～今天也要元气满满地开始哦！",
         "{}，欢迎回来～今天也一起加油吧！",
@@ -72,3 +73,9 @@ TTS_TEXTS = {
         "今天这里好热闹呀，我已经准备好接待大家啦！",
     ],
 }
+
+TTS_TEXTS = merge_daily_texts(DEFAULT_TTS_TEXTS)
+
+
+def reload_daily_texts() -> None:
+    refresh_texts(DEFAULT_TTS_TEXTS, TTS_TEXTS)

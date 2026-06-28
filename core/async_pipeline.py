@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import threading
-import time
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +24,7 @@ class AsyncPipelineWrapper:
         self._latest_result = None
         self._running = False
         self._thread: threading.Thread | None = None
+        self._frame_ready = threading.Event()
         self._total_frames = 0
         self._processed_frames = 0
         self._dropped_frames = 0
@@ -51,6 +51,7 @@ class AsyncPipelineWrapper:
 
     def stop(self) -> None:
         self._running = False
+        self._frame_ready.set()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=3.0)
         logger.info(
@@ -62,8 +63,11 @@ class AsyncPipelineWrapper:
 
     def submit_frame(self, frame) -> None:
         with self._frame_lock:
+            if self._latest_frame is not None:
+                self._dropped_frames += 1
             self._latest_frame = frame
             self._total_frames += 1
+            self._frame_ready.set()
 
     def get_result(self):
         with self._result_lock:
@@ -71,12 +75,14 @@ class AsyncPipelineWrapper:
 
     def _run(self) -> None:
         while self._running:
+            self._frame_ready.wait(timeout=0.1)
             with self._frame_lock:
                 if self._latest_frame is None:
-                    time.sleep(0.001)
+                    self._frame_ready.clear()
                     continue
                 frame = self._latest_frame
                 self._latest_frame = None
+                self._frame_ready.clear()
 
             try:
                 result = self._pipeline.process_frame(frame)
