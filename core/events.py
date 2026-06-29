@@ -141,4 +141,8 @@ class EventBus:
         self._avatar_event("idle_long", {})
 
     def crowd(self, count: int) -> None:
+        now = time.time()
+        if self._last_avatar_event and self._last_avatar_event.get("type") == "crowd":
+            if now - self._last_avatar_time < 30.0:
+                return
         self._avatar_event("crowd", {"count": count})
