@@ -278,7 +278,7 @@ class EmotionDecisionModule:
         "returning": 0.7,
         "returning_stranger": 0.6,
         "repeat": 0.35,
-        "stranger": 0.0,
+        "stranger": 1.0,
         "idle_long": 0.0,
         "crowd": 0.0,
     }
@@ -300,7 +300,12 @@ class EmotionDecisionModule:
         if speech_type not in self.SPEECH_EVENTS:
             return
 
-        name = payload.get("name") or payload.get("visitor_label") or "访客"
+        name = (
+            payload.get("name")
+            or payload.get("salutation")
+            or payload.get("visitor_label")
+            or "访客"
+        )
         text = self._pick_text(speech_type, name)
         if not text:
             return
@@ -330,6 +335,8 @@ class EmotionDecisionModule:
     def _pick_text(self, event_type: str, name: str) -> str:
         include_name = self._should_include_name(event_type, name)
         text = choose_text(TTS_TEXTS, event_type, require_placeholder=include_name)
+        if not text and include_name:
+            text = self._fallback_named_text(event_type)
         if not text:
             text = choose_text(TTS_TEXTS, event_type)
         if not text:
@@ -338,6 +345,14 @@ class EmotionDecisionModule:
             return text
         if include_name:
             return text.format(name)
+        return ""
+
+    @staticmethod
+    def _fallback_named_text(event_type: str) -> str:
+        if event_type == "stranger":
+            return "{}，欢迎来到这里～"
+        if event_type == "returning_stranger":
+            return "{}，又见面啦，欢迎回来。"
         return ""
 
     def _should_include_name(self, event_type: str, name: str) -> bool:

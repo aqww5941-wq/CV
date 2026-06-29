@@ -114,11 +114,15 @@ class EventBus:
         self,
         visitor_label: str | None = None,
         is_returning: bool = False,
+        gender: str | None = None,
+        salutation: str | None = None,
     ) -> None:
         payload = {
             "time": time.time(),
             "visitor_label": visitor_label or "未知访客",
             "is_returning": is_returning,
+            "gender": gender,
+            "salutation": salutation,
         }
         self.publish("stranger_detected", payload)
         self._avatar_event("stranger", payload)

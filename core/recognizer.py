@@ -14,6 +14,7 @@ from config import (
     INSIGHTFACE_DET_SIZE,
     INSIGHTFACE_PROVIDERS,
 )
+from core.gender import normalize_gender
 from core.insightface_factory import create_face_analysis
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,7 @@ class FaceRecognizer:
                     "bbox": bbox,
                     "embedding": face.normed_embedding,
                     "det_score": float(face.det_score),
+                    "gender": normalize_gender(getattr(face, "gender", None)),
                     "kps": face.kps.astype(float).tolist()
                     if getattr(face, "kps", None) is not None
                     else None,

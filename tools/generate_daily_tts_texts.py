@@ -39,10 +39,10 @@ TEXT_COUNTS = {
 }
 
 NAME_PLACEHOLDER_COUNTS = {
-    "check_in": {"with_name": 6, "without_name": 2},
+    "check_in": {"with_name": 8, "without_name": 0},
     "repeat": {"with_name": 3, "without_name": 7},
-    "check_out": {"with_name": 4, "without_name": 2},
-    "stranger": {"with_name": 0, "without_name": 5},
+    "check_out": {"with_name": 6, "without_name": 0},
+    "stranger": {"with_name": 3, "without_name": 2},
     "returning_stranger": {"with_name": 2, "without_name": 2},
     "first_time": {"with_name": 3, "without_name": 1},
     "returning": {"with_name": 2, "without_name": 2},
@@ -208,9 +208,12 @@ def _build_prompt(context: dict) -> str:
 4. 带姓名的句子只使用 {{name}} 作为姓名占位；不带姓名的句子绝对不要出现 {{name}}。
 5. 需要温暖、自然、有一点轻松感；可以关心、调侃、幽默、问候，但不要油腻。
 6. 每句话尽量 8 到 28 个中文字符，适合 TTS 播放，避免长句被截断。
-7. repeat 主要用不带姓名的轻量问候，少量穿插姓名即可。
-8. stranger/idle_long/crowd 必须全部不带姓名。
-9. 不要涉及政治、宗教、医疗建议、投资建议，不要说“我是 AI”。
+7. check_in 和 check_out 必须每一句都带 {{name}}，不要生成任何不带姓名的签到/签退句。
+8. repeat 必须同时包含带 {{name}} 和不带 {{name}} 的句子，用于运行时随机穿插姓名。
+9. stranger 可使用 {{name}} 表示“小哥哥/小姐姐”等访客称呼；idle_long/crowd 必须全部不带姓名。
+10. crowd 是数字人发现很多人同时看着自己时的害羞、惊喜、开心反应，要像“这么多人看着我，我好害羞呀”这种可爱自我表达。
+11. crowd 禁止写成通知、广播、安保或办事引导口吻，不要出现排队、办理手续、电梯口、拥挤、安全、通行、配合、秩序等词。
+12. 不要涉及政治、宗教、医疗建议、投资建议，不要说“我是 AI”。
 """.strip()
 
 
@@ -304,8 +307,8 @@ def _fallback_texts(context: dict) -> dict[str, list[str]]:
             "{}，签到成功，元气已到账。",
             "{}，打卡完成，今天顺顺利利。",
             "{}，早呀，今天继续闪亮上班。",
-            f"{week_hint}早上好，今天也稳稳来。",
-            f"{friday_hint}签到成功，开心开工。",
+            f"{{}}，{week_hint}早上好，今天也稳稳来。",
+            f"{{}}，{friday_hint}签到成功，开心开工。",
         ],
         "repeat": [
             "{}，又见面啦，记得喝口水。",
@@ -324,10 +327,13 @@ def _fallback_texts(context: dict) -> dict[str, list[str]]:
             "{}，签退完成，路上注意安全。",
             "{}，今天表现不错，早点休息。",
             "{}，下班快乐，明天见。",
-            "签退完成，路上注意安全。",
-            "今天辛苦啦，回去好好放松。",
+            "{}，签退完成，路上注意安全。",
+            "{}，今天辛苦啦，回去好好放松。",
         ],
         "stranger": [
+            "{}你好，欢迎来访，请稍等。",
+            "{}，欢迎光临，请先登记。",
+            "{}，工作人员会协助您。",
             "您好，欢迎来访，请稍等。",
             "新朋友你好，请到前台登记。",
             "欢迎光临，工作人员会协助您。",
@@ -359,10 +365,10 @@ def _fallback_texts(context: dict) -> dict[str, list[str]]:
             "没人经过的时候，也要精神在线。",
         ],
         "crowd": [
-            "大家慢慢来，我一个个认真识别。",
-            "今天好热闹，大家请有序通行。",
-            "人有点多，请大家稍微排队。",
-            "我正在认真识别，请稍等一下。",
+            "这么多人看着我，我有点害羞呀。",
+            "哇，大家一起出现，我脸都要红啦。",
+            "一下子被大家围观，我要认真营业啦。",
+            "今天好热闹呀，我都有点小紧张。",
         ],
     }
 

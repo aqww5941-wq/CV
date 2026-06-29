@@ -16,6 +16,7 @@ class CachedUnknownVisitor:
     label: str
     similarity: float
     is_returning: bool
+    gender: str | None = None
 
 
 @dataclass
@@ -28,6 +29,7 @@ class _CacheEntry:
     visitor_id: str | None = None
     label: str | None = None
     is_returning: bool = False
+    gender: str | None = None
 
 
 class RecognitionCache:
@@ -91,6 +93,7 @@ class RecognitionCache:
             label=entry.label or "未知访客",
             similarity=entry.similarity,
             is_returning=entry.is_returning,
+            gender=entry.gender,
         )
 
     def set_unknown(
@@ -100,6 +103,7 @@ class RecognitionCache:
         label: str,
         similarity: float,
         is_returning: bool,
+        gender: str | None,
         embedding,
     ) -> None:
         self._cache[track_id] = _CacheEntry(
@@ -108,6 +112,7 @@ class RecognitionCache:
             label=label,
             similarity=float(similarity),
             is_returning=is_returning,
+            gender=gender,
             embedding=_normalized(embedding),
             updated_at=time.time(),
         )

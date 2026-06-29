@@ -23,6 +23,7 @@ class UnknownVisitorMatch:
     similarity: float
     is_returning: bool
     visit_count: int
+    gender: str | None = None
 
 
 class UnknownVisitorStore:
@@ -33,7 +34,7 @@ class UnknownVisitorStore:
         self._records: dict[str, dict] = {}
         self._load()
 
-    def match_or_create(self, embedding) -> UnknownVisitorMatch:
+    def match_or_create(self, embedding, gender: str | None = None) -> UnknownVisitorMatch:
         vector = _normalized(embedding)
         now = time.time()
         visitor_id, similarity = self._best_match(vector)
@@ -45,6 +46,8 @@ class UnknownVisitorStore:
                 record["embedding"] = _normalized(
                     (np.asarray(record["embedding"], dtype=np.float32) + vector) / 2.0
                 )
+            if gender and not record.get("gender"):
+                record["gender"] = gender
             record["last_seen"] = now
             self._save()
             return UnknownVisitorMatch(
@@ -53,6 +56,7 @@ class UnknownVisitorStore:
                 similarity=similarity,
                 is_returning=is_returning,
                 visit_count=int(record.get("visit_count", 1)),
+                gender=record.get("gender") or gender,
             )
 
         visitor_id = self._next_id()
@@ -63,6 +67,7 @@ class UnknownVisitorStore:
             "first_seen": now,
             "last_seen": now,
             "visit_count": 1,
+            "gender": gender,
         }
         self._save()
         return UnknownVisitorMatch(
@@ -71,6 +76,7 @@ class UnknownVisitorStore:
             similarity=0.0,
             is_returning=False,
             visit_count=1,
+            gender=gender,
         )
 
     def _best_match(self, vector: np.ndarray) -> tuple[str | None, float]:

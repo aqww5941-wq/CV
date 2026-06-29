@@ -27,6 +27,7 @@ from core.face_utils import (
     check_face_quality,
     is_complete_face_for_stranger,
 )
+from core.gender import gender_display_name, gender_salutation
 from core.recognition_cache import RecognitionCache
 from core.recognizer import FaceRecognizer
 from core.tracker import FaceTracker
@@ -61,6 +62,7 @@ class ProcessedFace:
     checked_in_now: bool = False
     unknown_visitor_id: str | None = None
     returning_unknown: bool = False
+    gender: str | None = None
 
 
 @dataclass
@@ -286,25 +288,34 @@ class RecognitionPipeline:
         if can_enroll and fresh_detection:
             visitor = self.rec_cache.get_unknown(track_id, face["embedding"])
             if visitor is None:
-                visitor = self.unknown_visitors.match_or_create(face["embedding"])
+                visitor = self.unknown_visitors.match_or_create(
+                    face["embedding"],
+                    gender=face.get("gender"),
+                )
                 self.rec_cache.set_unknown(
                     track_id,
                     visitor.visitor_id,
                     visitor.label,
                     visitor.similarity,
                     visitor.is_returning,
+                    visitor.gender,
                     face["embedding"],
                 )
 
             if self.recognizer.should_log_stranger():
+                effective_gender = visitor.gender or face.get("gender")
+                salutation = gender_salutation(effective_gender)
                 self.event_bus.stranger(
                     visitor_label=visitor.label,
                     is_returning=visitor.is_returning,
+                    gender=effective_gender,
+                    salutation=salutation,
                 )
                 logger.info(
-                    "检测到%s: %s (sim=%.3f)",
+                    "检测到%s: %s, %s (sim=%.3f)",
                     "回访未知访客" if visitor.is_returning else "新未知访客",
                     visitor.label,
+                    gender_display_name(effective_gender),
                     visitor.similarity,
                 )
         elif (
@@ -313,17 +324,27 @@ class RecognitionPipeline:
             and self.unknown_hits.get(track_id, 0) >= STRANGER_MIN_UNKNOWN_HITS
             and self.recognizer.should_log_stranger()
         ):
-            self.event_bus.stranger()
+            gender = face.get("gender")
+            self.event_bus.stranger(
+                gender=gender,
+                salutation=gender_salutation(gender),
+            )
             logger.info(
-                "检测到未知访客但未入库: sim=%.3f, hits=%d",
+                "检测到未知访客但未入库: sim=%.3f, hits=%d, gender=%s",
                 similarity,
                 self.unknown_hits.get(track_id, 0),
+                gender_display_name(gender),
             )
 
         if complete_face and not fresh_detection:
             label = "识别中"
         else:
             label = self._unknown_label(visitor, complete_face)
+        result_gender = (
+            visitor.gender or face.get("gender")
+            if visitor
+            else face.get("gender")
+        )
 
         return ProcessedFace(
             bbox=bbox,
@@ -334,6 +355,7 @@ class RecognitionPipeline:
             label=label,
             unknown_visitor_id=visitor.visitor_id if visitor else None,
             returning_unknown=visitor.is_returning if visitor else False,
+            gender=result_gender,
         )
 
     @staticmethod

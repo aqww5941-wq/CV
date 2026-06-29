@@ -45,6 +45,7 @@ class FaceTracker:
                 "embedding": t["embedding"],
                 "det_score": t["det_score"],
                 "kps": t.get("kps"),
+                "gender": t.get("gender"),
                 "track_id": t["track_id"],
                 "fresh_detection": t.get("fresh_detection", False),
             }
@@ -72,6 +73,7 @@ class FaceTracker:
                 best_track["embedding"] = det["embedding"]
                 best_track["det_score"] = det["det_score"]
                 best_track["kps"] = det.get("kps")
+                best_track["gender"] = det.get("gender")
                 best_track["lost_frames"] = 0
                 best_track["fresh_detection"] = True
                 best_track["tracker"] = self._init_cv_tracker(frame, det_bbox)
@@ -85,6 +87,7 @@ class FaceTracker:
                         "embedding": det["embedding"],
                         "det_score": det["det_score"],
                         "kps": det.get("kps"),
+                        "gender": det.get("gender"),
                         "lost_frames": 0,
                         "fresh_detection": True,
                         "tracker": self._init_cv_tracker(frame, det_bbox),
