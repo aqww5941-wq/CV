@@ -36,6 +36,8 @@
     let isSwitchingModel = false;
     let queuedModelKey = null;
     let statusMode = 'idle';
+    let lastBehaviorName = '';
+    let lastBehaviorAt = 0;
 
     const MODEL_REGISTRY = {
         epsilon: {
@@ -305,6 +307,39 @@
             ],
             tts: 'crowd',
             idleDelay: 5600
+        }
+    };
+
+    const MODEL_BEHAVIOR_OVERRIDES = {
+        epsilon: {
+            greet: {
+                expression: ['Normal', 'Blushing', 'Smile'],
+                motions: [['Flick3', 0], ['Flick3', 1], ['Shake', 0], ['Shake', 1]]
+            },
+            check_in: {
+                expression: ['Normal', 'Blushing', 'Smile'],
+                motions: [['Flick3', 0], ['Flick3', 1], ['Shake', 0], ['Shake', 1]]
+            },
+            first_time: {
+                expression: ['Normal', 'Blushing', 'Smile'],
+                motions: [['Flick3', 0], ['Flick3', 1]]
+            },
+            returning: {
+                expression: ['Normal', 'Blushing', 'Smile'],
+                motions: [['Flick3', 0], ['Flick3', 1], ['Shake', 0], ['Shake', 1]]
+            },
+            check_out: {
+                expression: ['Normal', 'Blushing', 'Smile'],
+                motions: [['Flick3', 0], ['Flick3', 1], ['Shake', 0], ['Shake', 1]]
+            },
+            stranger: {
+                expression: ['Normal', 'Blushing', 'Smile'],
+                motions: [['Flick3', 0], ['Flick3', 1], ['Shake', 0], ['Shake', 1]]
+            },
+            repeat: {
+                expressionPool: 'all',
+                motionPool: 'visible'
+            }
         }
     };
 
@@ -687,21 +722,68 @@
         return items[Math.floor(Math.random() * items.length)];
     }
 
+    function getBehaviorConfig(name) {
+        var base = BEHAVIORS[name];
+        if (!base) return null;
+
+        var modelOverrides = MODEL_BEHAVIOR_OVERRIDES[currentModelKey] || {};
+        var override = modelOverrides[name];
+        if (!override) return base;
+
+        var config = {};
+        Object.keys(base).forEach(function (key) {
+            config[key] = base[key];
+        });
+        Object.keys(override).forEach(function (key) {
+            config[key] = override[key];
+        });
+        return config;
+    }
+
+    function resolveBehaviorExpression(behavior) {
+        if (behavior.expressionPool === 'all') {
+            var buttons = (currentModelConfig && currentModelConfig.expressionButtons) || [];
+            return buttons.length > 0 ? pick(buttons) : (behavior.expression || 'Normal');
+        }
+        if (Array.isArray(behavior.expression)) {
+            return pick(behavior.expression);
+        }
+        return behavior.expression || 'Normal';
+    }
+
+    function resolveBehaviorMotions(behavior) {
+        if (behavior.motionPool === 'all' || behavior.motionPool === 'visible') {
+            var counts = (currentModelConfig && currentModelConfig.motionCounts) || {};
+            var motions = [];
+            Object.keys(counts).forEach(function (group) {
+                if (behavior.motionPool === 'visible' && group === 'Idle') return;
+                for (var i = 0; i < counts[group]; i++) {
+                    motions.push([group, i]);
+                }
+            });
+            return motions.length > 0 ? motions : (behavior.motions || []);
+        }
+        return behavior.motions || [];
+    }
+
     function runBehavior(name, options) {
         if (!model) return;
 
         options = options || {};
-        var behavior = BEHAVIORS[name];
+        var behavior = getBehaviorConfig(name);
         if (!behavior) return;
 
+        lastBehaviorName = name;
+        lastBehaviorAt = performance.now();
         idleState = name;
         stopIdleCycle();
         clearIdleTimer();
 
-        setExpression(behavior.expression || 'Normal');
+        setExpression(resolveBehaviorExpression(behavior));
 
-        if (behavior.motions && behavior.motions.length > 0) {
-            var motion = pick(behavior.motions);
+        var motions = resolveBehaviorMotions(behavior);
+        if (motions.length > 0) {
+            var motion = pick(motions);
             setTimeout(function () {
                 playMotion(motion[0], motion[1]);
             }, 80);
@@ -713,6 +795,28 @@
 
         showStatus(behavior.status || '动作中', 'activity');
         scheduleIdle(options.idleDelay || behavior.idleDelay || 4000);
+    }
+
+    function normalizeSpeechBehaviorType(type) {
+        if (type === 'first_time') return 'first_time';
+        if (type === 'returning') return 'returning';
+        if (type === 'check_in') return 'check_in';
+        if (type === 'check_out') return 'check_out';
+        if (type === 'stranger' || type === 'returning_stranger') return 'stranger';
+        if (type === 'repeat') return 'repeat';
+        return '';
+    }
+
+    function maybeRunSpeechVisualFallback(msg) {
+        var behaviorName = normalizeSpeechBehaviorType(msg.event_type || msg.type);
+        if (!behaviorName) return;
+        var now = performance.now();
+        if (behaviorName !== 'first_time' && lastBehaviorName === behaviorName && now - lastBehaviorAt < 1400) {
+            return;
+        }
+        setTimeout(function () {
+            runBehavior(behaviorName, { name: msg.name || '访客', silent: true });
+        }, behaviorName === 'first_time' ? 260 : 0);
     }
 
     function doAction(action) {
@@ -1044,6 +1148,7 @@
                 stopLipSync();
                 startExternalLipSync();
             }
+            maybeRunSpeechVisualFallback(msg);
             return;
         }
 
@@ -1058,13 +1163,19 @@
         clearIdleTimer();
         switch (msg.type) {
             case 'check_in':
-                if (msg.is_first) {
-                    runBehavior('greet', { name: msg.name || '访客', silent: true });
-                } else if (msg.is_returning) {
-                    runBehavior('greet', { name: msg.name || '访客', silent: true });
+                if (msg.is_first === true || msg.is_first === 'true' || msg.event_type === 'first_time') {
+                    runBehavior('first_time', { name: msg.name || '访客', silent: true });
+                } else if (msg.is_returning === true || msg.is_returning === 'true' || msg.event_type === 'returning') {
+                    runBehavior('returning', { name: msg.name || '访客', silent: true });
                 } else {
-                    runBehavior('greet', { name: msg.name || '访客', silent: true });
+                    runBehavior('check_in', { name: msg.name || '访客', silent: true });
                 }
+                break;
+            case 'first_time':
+                runBehavior('first_time', { name: msg.name || '访客', silent: true });
+                break;
+            case 'returning':
+                runBehavior('returning', { name: msg.name || '访客', silent: true });
                 break;
             case 'check_out':
                 runBehavior('check_out', { name: msg.name || '访客', silent: true });

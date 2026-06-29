@@ -470,6 +470,7 @@ class RecognitionPipeline:
                 )
                 row_id = self.attendance_db.check_in(name)
             self.checkin_tracker.mark_checked_in(name)
+            self.repeat_feedback_times[name] = time.time()
             self.event_bus.checkin(
                 name,
                 row_id,
