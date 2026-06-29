@@ -129,12 +129,14 @@ class TTSWorkerThread(threading.Thread):
         audio_queue: queue.Queue,
         cache: TTSAudioCache,
         client,
+        speech_suppressed: threading.Event | None = None,
     ):
         super().__init__(name="TTSWorkerThread", daemon=True)
         self.tts_queue = tts_queue
         self.audio_queue = audio_queue
         self.cache = cache
         self.client = client
+        self.speech_suppressed = speech_suppressed
         self._stop_event = threading.Event()
 
     def stop(self) -> None:
@@ -147,6 +149,9 @@ class TTSWorkerThread(threading.Thread):
             if request is None:
                 break
             try:
+                if self._is_suppressed():
+                    logger.debug("TTS request suppressed by realtime dialog: %s", request.event_type)
+                    continue
                 cache_material = self.client.build_cache_material(request)
                 key = self.cache.key_for(request, cache_material)
                 path = self.cache.get(key)
@@ -159,6 +164,9 @@ class TTSWorkerThread(threading.Thread):
                     logger.info("Edge TTS generated: %s -> %s", request.text, path)
                 else:
                     logger.debug("TTS cache hit: %s", request.text)
+                if self._is_suppressed():
+                    logger.debug("TTS audio job suppressed by realtime dialog: %s", request.event_type)
+                    continue
                 self.audio_queue.put(
                     AudioJob(
                         path=path,
@@ -172,19 +180,37 @@ class TTSWorkerThread(threading.Thread):
             finally:
                 self.tts_queue.task_done()
 
+    def _is_suppressed(self) -> bool:
+        return bool(self.speech_suppressed and self.speech_suppressed.is_set())
+
 
 class AudioPlayerThread(threading.Thread):
     """Serial audio playback worker. Face recognition never waits on it."""
 
-    def __init__(self, audio_queue: queue.Queue, live2d: Live2DController | None = None):
+    def __init__(
+        self,
+        audio_queue: queue.Queue,
+        live2d: Live2DController | None = None,
+        speech_suppressed: threading.Event | None = None,
+    ):
         super().__init__(name="AudioPlayerThread", daemon=True)
         self.audio_queue = audio_queue
         self.live2d = live2d
+        self.speech_suppressed = speech_suppressed
         self._stop_event = threading.Event()
 
     def stop(self) -> None:
         self._stop_event.set()
         self.audio_queue.put(None)
+
+    def stop_current_playback(self) -> None:
+        try:
+            import pygame.mixer
+
+            if pygame.mixer.get_init() and pygame.mixer.music.get_busy():
+                pygame.mixer.music.stop()
+        except Exception:
+            pass
 
     def run(self) -> None:
         import pygame.mixer
@@ -195,6 +221,9 @@ class AudioPlayerThread(threading.Thread):
             if job is None:
                 break
             try:
+                if self._is_suppressed():
+                    logger.debug("Audio job suppressed by realtime dialog: %s", job.event_type)
+                    continue
                 pygame.mixer.music.load(job.path)
                 if self.live2d is not None and job.text:
                     self.live2d.enqueue(
@@ -206,14 +235,22 @@ class AudioPlayerThread(threading.Thread):
                         },
                     )
                 pygame.mixer.music.play()
+                interrupted = False
                 while pygame.mixer.music.get_busy() and not self._stop_event.is_set():
+                    if self._is_suppressed():
+                        pygame.mixer.music.stop()
+                        interrupted = True
+                        break
                     time.sleep(0.02)
-                if self.live2d is not None and job.text:
+                if self.live2d is not None and job.text and not interrupted:
                     self.live2d.enqueue("speech_end", {"event_type": job.event_type})
             except Exception as exc:
                 logger.warning("Audio playback failed (%s): %s", job.path, exc)
             finally:
                 self.audio_queue.task_done()
+
+    def _is_suppressed(self) -> bool:
+        return bool(self.speech_suppressed and self.speech_suppressed.is_set())
 
 
 class Live2DController(threading.Thread):
@@ -230,6 +267,9 @@ class Live2DController(threading.Thread):
             self.action_queue.put_nowait(Live2DAction(event_type, payload))
         except queue.Full:
             logger.debug("Live2D action dropped because queue is full: %s", event_type)
+
+    def clear_pending(self) -> None:
+        _drain_queue(self.action_queue)
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -283,14 +323,24 @@ class EmotionDecisionModule:
         "crowd": 0.0,
     }
 
-    def __init__(self, tts_queue: queue.Queue, live2d: Live2DController):
+    def __init__(
+        self,
+        tts_queue: queue.Queue,
+        live2d: Live2DController,
+        speech_suppressed: threading.Event | None = None,
+    ):
         self.tts_queue = tts_queue
         self.live2d = live2d
+        self.speech_suppressed = speech_suppressed
         self._last_model_key = ""
         self._last_voice = TTS_VOICE
         self._last_voice_refresh = 0.0
 
     def on_avatar_event(self, event_type: str, payload: dict) -> None:
+        if self._is_suppressed():
+            logger.debug("Avatar event suppressed by realtime dialog: %s", event_type)
+            return
+
         self.live2d.enqueue(event_type, payload)
 
         if event_type in self.SILENT_ACTIONS:
@@ -322,6 +372,9 @@ class EmotionDecisionModule:
             )
         except queue.Full:
             logger.debug("TTS request dropped because queue is full: %s", speech_type)
+
+    def _is_suppressed(self) -> bool:
+        return bool(self.speech_suppressed and self.speech_suppressed.is_set())
 
     def _resolve_speech_type(self, event_type: str, payload: dict) -> str:
         if event_type == "check_in" and payload.get("is_first"):
@@ -385,12 +438,27 @@ class VoiceSystem:
     def __init__(self):
         self.tts_queue: queue.Queue[Optional[TTSRequest]] = queue.Queue(maxsize=TTS_QUEUE_MAXSIZE)
         self.audio_queue: queue.Queue[Optional[AudioJob]] = queue.Queue(maxsize=AUDIO_QUEUE_MAXSIZE)
+        self.realtime_dialog_active = threading.Event()
         self.cache = TTSAudioCache()
         self.tts_client = EdgeTTSClient()
         self.live2d = Live2DController()
-        self.emotion = EmotionDecisionModule(self.tts_queue, self.live2d)
-        self.tts_worker = TTSWorkerThread(self.tts_queue, self.audio_queue, self.cache, self.tts_client)
-        self.audio_player = AudioPlayerThread(self.audio_queue, live2d=self.live2d)
+        self.emotion = EmotionDecisionModule(
+            self.tts_queue,
+            self.live2d,
+            speech_suppressed=self.realtime_dialog_active,
+        )
+        self.tts_worker = TTSWorkerThread(
+            self.tts_queue,
+            self.audio_queue,
+            self.cache,
+            self.tts_client,
+            speech_suppressed=self.realtime_dialog_active,
+        )
+        self.audio_player = AudioPlayerThread(
+            self.audio_queue,
+            live2d=self.live2d,
+            speech_suppressed=self.realtime_dialog_active,
+        )
 
     def start(self) -> None:
         self.live2d.start()
@@ -402,3 +470,24 @@ class VoiceSystem:
         self.tts_worker.stop()
         self.audio_player.stop()
         self.live2d.stop()
+
+    def set_realtime_dialog_active(self, active: bool) -> None:
+        if active:
+            self.realtime_dialog_active.set()
+            self.audio_player.stop_current_playback()
+            _drain_queue(self.tts_queue)
+            _drain_queue(self.audio_queue)
+            self.live2d.clear_pending()
+            logger.debug("Realtime dialog priority enabled; legacy speech queues cleared")
+        else:
+            self.realtime_dialog_active.clear()
+            logger.debug("Realtime dialog priority released")
+
+
+def _drain_queue(target: queue.Queue) -> None:
+    while True:
+        try:
+            target.get_nowait()
+            target.task_done()
+        except queue.Empty:
+            break

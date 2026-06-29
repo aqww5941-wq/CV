@@ -14,6 +14,8 @@ from config import (
     CAMERA_BUFFER_SIZE,
     ENABLE_GUI,
     DETECT_INTERVAL,
+    ENABLE_REALTIME_DIALOG,
+    VOTE_MIN_VOTES,
     VOTE_WINDOW,
 )
 from core.attendance_db import AttendanceDB
@@ -23,6 +25,7 @@ from core.face_db import FaceDatabase
 from core.recognizer import FaceRecognizer
 from core.recognition_cache import RecognitionCache
 from core.recognition_pipeline import RecognitionPipeline
+from core.realtime_dialog import RealtimeDialogService
 from core.redis_checkin import RedisCheckIn
 from core.tracker import FaceTracker
 from core.unknown_visitors import UnknownVisitorStore
@@ -48,7 +51,7 @@ def _run_headless_loop(
         "无界面模式启动 (ENABLE_GUI=False)，检测间隔=%d 帧，投票窗口=%d/%d 票，摄像头静默运行中...",
         DETECT_INTERVAL,
         VOTE_WINDOW,
-        VOTE_WINDOW,
+        VOTE_MIN_VOTES,
     )
     logger.info("按 Ctrl+C 退出")
     fps_start = time.time()
@@ -130,7 +133,7 @@ def main():
     except Exception as e:
         logger.warning("pgvector 不可用, 降级为 pickle 缓存: %s", e)
 
-    tracker = FaceTracker(detect_interval=DETECT_INTERVAL)
+    tracker = FaceTracker()
 
     attendance_db = AttendanceDB()
     checkin_tracker = RedisCheckIn()
@@ -151,6 +154,13 @@ def main():
 
     voice_system = VoiceSystem()
     voice_system.start()
+    realtime_dialog = None
+    if ENABLE_REALTIME_DIALOG:
+        realtime_dialog = RealtimeDialogService(
+            live2d=voice_system.live2d,
+            voice_system=voice_system,
+        )
+        realtime_dialog.start()
     quote_scheduler = DailyQuoteScheduler(hour=6, minute=0)
     quote_scheduler.start()
     event_bus = EventBus(emotion_module=voice_system.emotion)
@@ -182,6 +192,8 @@ def main():
                 checkin_tracker,
             )
     finally:
+        if realtime_dialog is not None:
+            realtime_dialog.stop()
         quote_scheduler.stop()
         pipeline.shutdown()
         voice_system.stop()

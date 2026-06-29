@@ -4,8 +4,17 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class TimedPipelineResult:
+    result: object
+    updated_at: float
+    sequence: int
 
 
 class AsyncPipelineWrapper:
@@ -21,13 +30,14 @@ class AsyncPipelineWrapper:
         self._frame_lock = threading.Lock()
         self._result_lock = threading.Lock()
         self._latest_frame = None
-        self._latest_result = None
+        self._latest_result: TimedPipelineResult | None = None
         self._running = False
         self._thread: threading.Thread | None = None
         self._frame_ready = threading.Event()
         self._total_frames = 0
         self._processed_frames = 0
         self._dropped_frames = 0
+        self._result_sequence = 0
 
     @property
     def stats(self) -> dict:
@@ -93,4 +103,9 @@ class AsyncPipelineWrapper:
                 continue
 
             with self._result_lock:
-                self._latest_result = result
+                self._result_sequence += 1
+                self._latest_result = TimedPipelineResult(
+                    result=result,
+                    updated_at=time.time(),
+                    sequence=self._result_sequence,
+                )

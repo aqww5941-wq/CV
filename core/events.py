@@ -5,7 +5,7 @@ import logging
 import time
 from datetime import datetime
 
-from config import MQ_TOPIC_PREFIX, REDIS_DB, REDIS_HOST, REDIS_PASSWORD, REDIS_PORT
+from config import MQ_TOPIC_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -21,20 +21,9 @@ class EventBus:
 
     def _init_backend(self):
         try:
-            import redis as rd
+            from core.redis_client import get_redis_client
 
-            r = rd.Redis(
-                host=REDIS_HOST,
-                port=REDIS_PORT,
-                password=REDIS_PASSWORD or None,
-                db=REDIS_DB,
-                decode_responses=True,
-                socket_connect_timeout=2,
-                socket_timeout=2,
-                socket_keepalive=True,
-                health_check_interval=30,
-                retry_on_timeout=True,
-            )
+            r = get_redis_client()
             r.ping()
             logger.info("事件总线就绪: Redis Pub/Sub")
             return r

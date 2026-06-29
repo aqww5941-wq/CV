@@ -41,7 +41,7 @@ class VoteBuffer:
         key = "__UNKNOWN__" if name is None else name
         self._buffers[track_id].append((key, similarity))
         buf = self._buffers[track_id]
-        if len(buf) < self._window:
+        if len(buf) < self._min_votes:
             return None
         counts: dict[str, int] = defaultdict(int)
         for n, _ in buf:
@@ -49,10 +49,9 @@ class VoteBuffer:
                 counts[n] += 1
         if not counts:
             return None
-        winner = max(counts, key=counts.get)
-        if counts[winner] >= self._min_votes:
-            self._confirmed[track_id] = (winner, now)
-            return winner
+        if key != "__UNKNOWN__" and counts[key] >= self._min_votes:
+            self._confirmed[track_id] = (key, now)
+            return key
         return None
 
     def cleanup_inactive(self, active_track_ids: set[int]) -> None:

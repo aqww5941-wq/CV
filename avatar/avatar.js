@@ -555,6 +555,15 @@
         });
     }
 
+    function startExternalLipSync() {
+        if (!model) return;
+        var t = performance.now() / 1000;
+        var target = 0.16 + Math.abs(Math.sin(t * 12.8)) * 0.54 + Math.abs(Math.sin(t * 5.4)) * 0.18;
+        lipValue = lipValue * 0.48 + Math.min(1, target) * 0.52;
+        setMouthOpen(lipValue);
+        lipFrame = requestAnimationFrame(startExternalLipSync);
+    }
+
     function stopLipSync() {
         if (lipFrame) {
             cancelAnimationFrame(lipFrame);
@@ -951,6 +960,10 @@
             if (msg.text) {
                 showStatus(msg.text, 'speech');
                 hideSubtitle();
+            }
+            if (msg.external_audio) {
+                stopLipSync();
+                startExternalLipSync();
             }
             return;
         }

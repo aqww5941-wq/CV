@@ -30,7 +30,7 @@ from core.face_utils import (
 from core.gender import gender_display_name, gender_salutation
 from core.recognition_cache import RecognitionCache
 from core.recognizer import FaceRecognizer
-from core.tracker import FaceTracker
+from core.tracker import FaceTrackerABC
 from core.unknown_visitors import UnknownVisitorStore
 from core.vote import VoteBuffer
 
@@ -38,17 +38,13 @@ logger = logging.getLogger(__name__)
 
 
 class CheckInStateStore(Protocol):
-    def is_checked_in_today(self, name: str) -> bool:
-        ...
+    def is_checked_in_today(self, name: str) -> bool: ...
 
-    def is_checked_out_today(self, name: str) -> bool:
-        ...
+    def is_checked_out_today(self, name: str) -> bool: ...
 
-    def mark_checked_in(self, name: str) -> None:
-        ...
+    def mark_checked_in(self, name: str) -> None: ...
 
-    def reset_checkin(self, name: str) -> None:
-        ...
+    def reset_checkin(self, name: str) -> None: ...
 
 
 @dataclass
@@ -78,7 +74,7 @@ class RecognitionPipeline:
     def __init__(
         self,
         recognizer: FaceRecognizer,
-        tracker: FaceTracker,
+        tracker: FaceTrackerABC,
         db_embeddings: list,
         attendance_db: AttendanceDB,
         checkin_tracker: CheckInStateStore,
@@ -129,12 +125,18 @@ class RecognitionPipeline:
 
         processed: list[ProcessedFace] = []
         checked_in_names: list[str] = []
+        needs_fresh_detection = False
 
         for face in self._select_business_faces(faces, frame.shape):
             item = self._process_face(face, frame.shape, now)
             processed.append(item)
             if item.checked_in_now and item.name:
                 checked_in_names.append(item.name)
+            if self._needs_more_detection(item):
+                needs_fresh_detection = True
+
+        if needs_fresh_detection:
+            self.tracker.request_detection()
 
         return PipelineResult(
             faces=processed,
@@ -213,7 +215,12 @@ class RecognitionPipeline:
                 label=quality.label,
             )
 
-        name, similarity, decision = self._recognize(track_id, face["embedding"])
+        fresh_detection = face.get("fresh_detection", True)
+        name, similarity, decision = self._recognize(
+            track_id,
+            face["embedding"],
+            fresh_detection=fresh_detection,
+        )
         similarity = float(similarity or 0.0)
 
         if name is None:
@@ -232,29 +239,28 @@ class RecognitionPipeline:
             track_id,
             now,
             decision,
-            face.get("fresh_detection", True),
+            fresh_detection,
+            face["embedding"],
         )
 
-    def _recognize(self, track_id: int, embedding) -> tuple[str | None, float, str]:
+    def _recognize(
+        self,
+        track_id: int,
+        embedding,
+        fresh_detection: bool,
+    ) -> tuple[str | None, float, str]:
         name, similarity = self.rec_cache.get_known(track_id)
         if name is not None:
-            return name, float(similarity or 0.0), "accept"
+            return name, float(similarity or 0.0), "cached"
 
         known_miss_similarity = self.rec_cache.get_known_miss(track_id, embedding)
         if known_miss_similarity is not None:
             return None, known_miss_similarity, "reject"
 
         candidate = self.matcher.match_candidate(embedding)
-        if candidate.decision == "accept" and candidate.name is not None:
-            self.rec_cache.set_known(
-                track_id,
-                candidate.name,
-                candidate.similarity,
-                embedding,
-            )
-        elif candidate.decision == "reject":
+        if candidate.decision == "reject" and fresh_detection:
             self.rec_cache.set_known_miss(track_id, candidate.similarity, embedding)
-        else:
+        elif candidate.decision == "review":
             logger.debug(
                 "识别进入复核区: %s sim=%.3f",
                 candidate.name,
@@ -341,9 +347,7 @@ class RecognitionPipeline:
         else:
             label = self._unknown_label(visitor, complete_face)
         result_gender = (
-            visitor.gender or face.get("gender")
-            if visitor
-            else face.get("gender")
+            visitor.gender or face.get("gender") if visitor else face.get("gender")
         )
 
         return ProcessedFace(
@@ -388,10 +392,11 @@ class RecognitionPipeline:
         now: float,
         decision: str = "accept",
         fresh_detection: bool = True,
+        embedding=None,
     ) -> ProcessedFace:
         try:
             vote_confirmed = False
-            if decision == "review":
+            if decision in {"accept", "review"}:
                 if not fresh_detection:
                     return self._face(
                         bbox,
@@ -411,22 +416,29 @@ class RecognitionPipeline:
                     )
                 name = voted_name
                 vote_confirmed = True
+                if embedding is not None:
+                    self.rec_cache.set_known(
+                        track_id,
+                        name,
+                        similarity,
+                        embedding,
+                    )
 
-            if not ALLOW_REPEAT_CHECKIN and self.checkin_tracker.is_checked_out_today(name):
+            if not ALLOW_REPEAT_CHECKIN and self.checkin_tracker.is_checked_out_today(
+                name
+            ):
                 return self._face(bbox, track_id, name, similarity, f"已签退 · {name}")
 
-            if not ALLOW_REPEAT_CHECKIN and self.checkin_tracker.is_checked_in_today(name):
+            if not ALLOW_REPEAT_CHECKIN and self.checkin_tracker.is_checked_in_today(
+                name
+            ):
                 self._maybe_repeat_feedback(name, now)
                 return self._face(bbox, track_id, name, similarity, f"已签到 · {name}")
 
             if self._is_pending_checkin(name):
                 return self._face(bbox, track_id, name, similarity, f"签到中 · {name}")
 
-            voted_name = (
-                name
-                if vote_confirmed
-                else self.vote_buffer.vote(track_id, name, similarity, now)
-            )
+            voted_name = name if vote_confirmed or decision == "cached" else None
             if voted_name is None:
                 return self._face(bbox, track_id, name, similarity, name)
 
@@ -514,3 +526,7 @@ class RecognitionPipeline:
             label=label,
             checked_in_now=checked_in_now,
         )
+
+    @staticmethod
+    def _needs_more_detection(face: ProcessedFace) -> bool:
+        return face.label.startswith("确认中") or face.label == "识别中"

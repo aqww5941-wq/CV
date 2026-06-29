@@ -114,9 +114,9 @@ DETECTION_THRESHOLD = _get_float("DETECTION_THRESHOLD", 0.5)
 MAX_PROCESS_FACES = _get_int("MAX_PROCESS_FACES", 3)
 
 # 识别质量门槛: 低质量脸只提示，不进入身份匹配/签到
-FACE_MIN_MATCH_SIZE = _get_int("FACE_MIN_MATCH_SIZE", 96)
-FACE_MIN_DET_SCORE = _get_float("FACE_MIN_DET_SCORE", 0.65)
-FACE_EDGE_MARGIN = _get_int("FACE_EDGE_MARGIN", 24)
+FACE_MIN_MATCH_SIZE = _get_int("FACE_MIN_MATCH_SIZE", 80)
+FACE_MIN_DET_SCORE = _get_float("FACE_MIN_DET_SCORE", 0.55)
+FACE_EDGE_MARGIN = _get_int("FACE_EDGE_MARGIN", 16)
 FACE_MIN_EYE_DISTANCE = _get_float("FACE_MIN_EYE_DISTANCE", 28.0)
 FACE_MAX_POSE_IMBALANCE = _get_float("FACE_MAX_POSE_IMBALANCE", 0.45)
 UNKNOWN_CACHE_TTL_SECONDS = _get_float("UNKNOWN_CACHE_TTL_SECONDS", 1.0)
@@ -136,12 +136,27 @@ UNKNOWN_ENROLL_MAX_POSE_IMBALANCE = _get_float(
     "UNKNOWN_ENROLL_MAX_POSE_IMBALANCE", 0.30
 )
 
+# ── 人脸跟踪器后端 ──
+# opencv: 检测 + IoU 关联 + OpenCV 单目标轻跟踪 (KCF/CSRT/MIL)
+# bytetrack: 检测 + Kalman 滤波预测 + IoU 贪心关联 (track_id 更稳定)
+TRACKER_BACKEND = os.getenv("TRACKER_BACKEND", "opencv")
+
 # OpenCV 轻跟踪器: KCF/CSRT 需要 opencv-contrib-python，MIL 通常随 opencv-python 可用
 OPENCV_TRACKER_TYPE = os.getenv("OPENCV_TRACKER_TYPE", "KCF")
 
+# ByteTrack 检测间隔 (帧): 每 N 帧做一次完整检测, 其余帧走 Kalman 预测
+# ByteTrack 建议 3-5 帧, 太低会削弱 track_id 稳定性优势
+BYTETRACK_DETECT_INTERVAL = _get_int("BYTETRACK_DETECT_INTERVAL", 3)
+
+# ByteTrack track 缓冲: 丢失多少帧后彻底移除 track
+BYTETRACK_TRACK_BUFFER = _get_int("BYTETRACK_TRACK_BUFFER", 30)
+
+# ByteTrack 匹配阈值: IoU 高于此值才认为同一 track
+BYTETRACK_MATCH_THRESHOLD = _get_float("BYTETRACK_MATCH_THRESHOLD", 0.3)
+
 # 多帧投票: 连续 N 帧识别结果投票, 避免单帧误识别 (眨眼/侧脸/模糊/运动)
-VOTE_WINDOW = _get_int("VOTE_WINDOW", 5)  # 滑动窗口大小
-VOTE_MIN_VOTES = _get_int("VOTE_MIN_VOTES", 3)  # 获胜者至少需要 N 票
+VOTE_WINDOW = _get_int("VOTE_WINDOW", 4)  # 滑动窗口大小
+VOTE_MIN_VOTES = _get_int("VOTE_MIN_VOTES", 2)  # 获胜者至少需要 N 票
 
 # ── MySQL 数据库连接配置 (业务数据: 考勤记录) ──
 MYSQL_HOST = os.getenv("MYSQL_HOST", "127.0.0.1")
@@ -165,6 +180,8 @@ REDIS_HOST = os.getenv("REDIS_HOST", "127.0.0.1")
 REDIS_PORT = _get_int("REDIS_PORT", 6379)
 REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", "")
 REDIS_DB = _get_int("REDIS_DB", 0)
+REDIS_POOL_SIZE = _get_int("REDIS_POOL_SIZE", 10)
+REDIS_POOL_MAX_OVERFLOW = _get_int("REDIS_POOL_MAX_OVERFLOW", 5)
 
 # ── 消息队列配置 (事件发布) ──
 MQ_TOPIC_PREFIX = os.getenv("MQ_TOPIC_PREFIX", "attendance")
@@ -184,6 +201,46 @@ TTS_VOICE_BY_MODEL = {
 TTS_CACHE_DIR = os.path.join(CACHE_DIR, "tts")
 TTS_QUEUE_MAXSIZE = _get_int("TTS_QUEUE_MAXSIZE", 32)
 AUDIO_QUEUE_MAXSIZE = _get_int("AUDIO_QUEUE_MAXSIZE", 16)
+
+# ── 豆包实时语音交互 ──
+ENABLE_REALTIME_DIALOG = _get_bool("ENABLE_REALTIME_DIALOG", False)
+REALTIME_DIALOG_BASE_URL = os.getenv(
+    "REALTIME_DIALOG_BASE_URL",
+    "wss://openspeech.bytedance.com/api/v3/realtime/dialogue",
+)
+REALTIME_DIALOG_APP_ID = os.getenv("REALTIME_DIALOG_APP_ID", "")
+REALTIME_DIALOG_ACCESS_KEY = os.getenv("REALTIME_DIALOG_ACCESS_KEY", "")
+REALTIME_DIALOG_RESOURCE_ID = os.getenv(
+    "REALTIME_DIALOG_RESOURCE_ID",
+    "volc.speech.dialog",
+)
+REALTIME_DIALOG_SPEAKER = os.getenv(
+    "REALTIME_DIALOG_SPEAKER",
+    "zh_female_xiaohe_jupiter_bigtts",
+)
+REALTIME_DIALOG_OUTPUT_FORMAT = os.getenv("REALTIME_DIALOG_OUTPUT_FORMAT", "pcm_s16le")
+REALTIME_DIALOG_BOT_NAME = os.getenv("REALTIME_DIALOG_BOT_NAME", "前台小助手")
+REALTIME_DIALOG_SYSTEM_ROLE = os.getenv(
+    "REALTIME_DIALOG_SYSTEM_ROLE",
+    "你是公司前台数字人，性格开朗、亲切、有一点害羞。你正在接待来访者和同事。",
+)
+REALTIME_DIALOG_SPEAKING_STYLE = os.getenv(
+    "REALTIME_DIALOG_SPEAKING_STYLE",
+    "回复要简短自然，每次一到两句话，像真人前台一样温柔活泼，不要长篇解释。",
+)
+REALTIME_DIALOG_CITY = os.getenv("REALTIME_DIALOG_CITY", "北京")
+REALTIME_DIALOG_RECV_TIMEOUT = _get_int("REALTIME_DIALOG_RECV_TIMEOUT", 10)
+REALTIME_DIALOG_SAY_HELLO = _get_bool("REALTIME_DIALOG_SAY_HELLO", False)
+REALTIME_DIALOG_RELEASE_GRACE_SECONDS = _get_float(
+    "REALTIME_DIALOG_RELEASE_GRACE_SECONDS",
+    0.8,
+)
+REALTIME_DIALOG_INPUT_SAMPLE_RATE = _get_int("REALTIME_DIALOG_INPUT_SAMPLE_RATE", 16000)
+REALTIME_DIALOG_INPUT_CHUNK = _get_int("REALTIME_DIALOG_INPUT_CHUNK", 3200)
+REALTIME_DIALOG_OUTPUT_SAMPLE_RATE = _get_int(
+    "REALTIME_DIALOG_OUTPUT_SAMPLE_RATE", 24000
+)
+REALTIME_DIALOG_OUTPUT_CHUNK = _get_int("REALTIME_DIALOG_OUTPUT_CHUNK", 3200)
 
 # ── 每日数字人语录生成 ──
 DAILY_TTS_TEXTS_FILE = os.getenv(
@@ -206,6 +263,6 @@ IDLE_LONG_THRESHOLD = _get_int("IDLE_LONG_THRESHOLD", 60)
 CROWD_THRESHOLD = _get_int("CROWD_THRESHOLD", 3)
 
 # 陌生人触发保护: 半脸/边缘脸/小脸不触发陌生人
-STRANGER_MIN_FACE_SIZE = _get_int("STRANGER_MIN_FACE_SIZE", 110)
-STRANGER_EDGE_MARGIN = _get_int("STRANGER_EDGE_MARGIN", 24)
-STRANGER_MIN_UNKNOWN_HITS = _get_int("STRANGER_MIN_UNKNOWN_HITS", 3)
+STRANGER_MIN_FACE_SIZE = _get_int("STRANGER_MIN_FACE_SIZE", 80)
+STRANGER_EDGE_MARGIN = _get_int("STRANGER_EDGE_MARGIN", 16)
+STRANGER_MIN_UNKNOWN_HITS = _get_int("STRANGER_MIN_UNKNOWN_HITS", 2)

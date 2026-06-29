@@ -6,7 +6,7 @@ import time
 
 import cv2
 
-from core.async_pipeline import AsyncPipelineWrapper
+from core.async_pipeline import AsyncPipelineWrapper, TimedPipelineResult
 from ui.render import (
     COLOR_CYAN,
     COLOR_DARK_BAR,
@@ -17,6 +17,8 @@ from ui.render import (
     draw_texts_on_frame,
     text_bbox,
 )
+
+RESULT_TTL_SECONDS = 6.0
 
 
 class OpenCVGuiLoop:
@@ -39,6 +41,9 @@ class OpenCVGuiLoop:
         self.button_rect = [0, 0, 0, 0]
         self.button_clicked = False
         self.last_recognized_name = ""
+        self.today_count = 0
+        self.today_checked_names: set[str] = set()
+        self.last_display_result: TimedPipelineResult | None = None
 
     def run(self) -> None:
         win_name = "AI智慧前台数字人系统"
@@ -64,7 +69,8 @@ class OpenCVGuiLoop:
 
                 frame = cv2.flip(frame, 1)
                 self.async_pipeline.submit_frame(frame.copy())
-                result = self.async_pipeline.get_result()
+                timed_result = self.async_pipeline.get_result()
+                result = self._display_result(timed_result)
                 h, w = frame.shape[:2]
 
                 self.last_recognized_name = ""
@@ -75,6 +81,11 @@ class OpenCVGuiLoop:
                     self._draw_faces(frame, result.faces, text_draws)
 
                     if result.checked_in_names:
+                        self.today_checked_names.update(result.checked_in_names)
+                        self.today_count = max(
+                            self.today_count,
+                            len(self.today_checked_names),
+                        )
                         welcome_text = (
                             f"欢迎回来, {result.checked_in_names[-1]}! 签到成功"
                         )
@@ -291,7 +302,7 @@ class OpenCVGuiLoop:
             {
                 "text": (
                     f"底库: {len(self.db_embeddings)} 人  |  "
-                    f"今日已签: {self.checkin_tracker.get_today_count()} 人"
+                    f"今日已签: {self.today_count} 人"
                 ),
                 "pos": (15, 24),
                 "size": 16,
@@ -311,3 +322,19 @@ class OpenCVGuiLoop:
         self.face_db.build(force=True)
         self.db_embeddings = self.face_db.get_all()
         self.pipeline.update_embeddings(self.db_embeddings)
+
+    def _display_result(self, timed_result):
+        if timed_result is None:
+            return self._resolve_last_result()
+        if getattr(timed_result.result, "face_count", 0) > 0:
+            self.last_display_result = timed_result
+            return timed_result.result
+        return self._resolve_last_result()
+
+    def _resolve_last_result(self):
+        if self.last_display_result is None:
+            return None
+        if time.time() - self.last_display_result.updated_at > RESULT_TTL_SECONDS:
+            self.last_display_result = None
+            return None
+        return self.last_display_result.result

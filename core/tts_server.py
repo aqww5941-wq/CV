@@ -1,12 +1,14 @@
 import asyncio
 import json
+import os
 import random
 import sys
 
-try:
-    from core.tts_texts import TTS_TEXTS, VOICE, VOICE_BY_MODEL
-except ModuleNotFoundError:
-    from tts_texts import TTS_TEXTS, VOICE, VOICE_BY_MODEL
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
+from core.tts_texts import TTS_TEXTS, VOICE, VOICE_BY_MODEL
 
 
 def resolve_voice(voice_or_model: str | None = None) -> str:
