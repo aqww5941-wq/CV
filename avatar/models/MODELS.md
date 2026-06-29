@@ -20,11 +20,11 @@ All web-runnable Live2D models live in this directory.
 - Receptionist-style model with many motions under `runtime/motion`.
 - No expression list is declared in its `model3.json`.
 
-## haru_ja
+## hiyori_zh-Hans
 
-- Entry: `haru_ja/runtime/haru.model3.json`
-- Includes expressions, motions, and bundled `runtime/sounds`.
-- The bundled sounds should stay disabled unless intentionally replacing system TTS.
+- Entry: `hiyori_zh-Hans/runtime/hiyori_pro_t11.model3.json`
+- Replaces the regular `haru` registry entry; `haru_greeter_ja` remains available separately.
+- Chinese package with motions under `runtime/motion` and no expression list in `model3.json`.
 
 ## natori_zh-Hans
 

@@ -24,6 +24,12 @@
     let lipData = null;
     let lipFrame = null;
     let lipValue = 0;
+    let mouthOpenValue = 0;
+    let mouthBoundModel = null;
+    let externalLipTarget = 0;
+    let externalLipNextChangeAt = 0;
+    let externalLipPauseUntil = 0;
+    let externalLipNextPauseAt = 0;
     let lipStartedAt = 0;
     let ttsRequestId = 0;
     let ttsMutedUntil = 0;
@@ -110,24 +116,29 @@
             }
         },
         haru: {
-            label: 'Haru',
-            path: 'models/haru_ja/runtime/haru.model3.json',
+            label: 'Hiyori',
+            path: 'models/hiyori_zh-Hans/runtime/hiyori_pro_t11.model3.json',
             voice: 'zh-CN-XiaoxiaoNeural',
-            fit: { width: 1200, height: 2000, scale: 0.68, y: 0.55 },
+            fit: { width: 1200, height: 2100, scale: 0.5, y: 0.55 },
             expressions: {},
             expressionButtons: [],
             motionCounts: {
                 Idle: 3,
-                Tap: 6,
-                Flick: 3,
-                FlickRight: 3,
-                FlickLeft: 3,
-                Flick3: 3,
-                Shake: 2
+                Tap: 2,
+                Flick: 1,
+                FlickUp: 1,
+                FlickDown: 1,
+                'Tap@Body': 1,
+                'Flick@Body': 1
             },
             motionMap: {
-                FlickUp: [['FlickRight', 0], ['FlickRight', 1], ['FlickRight', 2]],
-                FlickDown: [['FlickLeft', 0], ['FlickLeft', 1], ['FlickLeft', 2]]
+                Idle: [['Idle', 0], ['Idle', 1], ['Idle', 2]],
+                Tap: [['Tap', 0], ['Tap', 1], ['Tap@Body', 0]],
+                Flick: [['Flick', 0], ['Flick@Body', 0]],
+                FlickUp: [['FlickUp', 0], ['Tap', 0]],
+                FlickDown: [['FlickDown', 0], ['Idle', 1]],
+                Flick3: [['Tap', 0], ['Tap', 1], ['Flick@Body', 0]],
+                Shake: [['Flick', 0], ['FlickDown', 0]]
             }
         },
         natori: {
@@ -557,9 +568,42 @@
 
     function startExternalLipSync() {
         if (!model) return;
-        var t = performance.now() / 1000;
-        var target = 0.16 + Math.abs(Math.sin(t * 12.8)) * 0.54 + Math.abs(Math.sin(t * 5.4)) * 0.18;
-        lipValue = lipValue * 0.48 + Math.min(1, target) * 0.52;
+        var now = performance.now();
+
+        if (!lipFrame || externalLipNextChangeAt <= 0) {
+            lipValue = 0.18;
+            externalLipTarget = 0.42;
+            externalLipNextChangeAt = now;
+            externalLipPauseUntil = 0;
+            externalLipNextPauseAt = now + 650 + Math.random() * 950;
+            setMouthOpen(lipValue);
+        }
+
+        if (now >= externalLipNextPauseAt) {
+            externalLipPauseUntil = now + 70 + Math.random() * 170;
+            externalLipNextPauseAt = now + 760 + Math.random() * 1200;
+        }
+
+        if (now < externalLipPauseUntil) {
+            externalLipTarget = 0.03 + Math.random() * 0.08;
+        } else if (now >= externalLipNextChangeAt) {
+            var r = Math.random();
+            if (r < 0.16) {
+                externalLipTarget = 0.02 + Math.random() * 0.08;
+            } else if (r < 0.42) {
+                externalLipTarget = 0.16 + Math.random() * 0.16;
+            } else if (r < 0.82) {
+                externalLipTarget = 0.34 + Math.random() * 0.24;
+            } else {
+                externalLipTarget = 0.58 + Math.random() * 0.24;
+            }
+            externalLipNextChangeAt = now + 55 + Math.random() * 95;
+        }
+
+        var target = Math.max(0, Math.min(1, externalLipTarget));
+        var smoothing = target > lipValue ? 0.46 : 0.34;
+        lipValue = lipValue * (1 - smoothing) + target * smoothing;
+        if (lipValue < 0.035) lipValue = 0;
         setMouthOpen(lipValue);
         lipFrame = requestAnimationFrame(startExternalLipSync);
     }
@@ -572,14 +616,23 @@
         lipAnalyser = null;
         lipData = null;
         lipValue = 0;
+        externalLipTarget = 0;
+        externalLipNextChangeAt = 0;
+        externalLipPauseUntil = 0;
+        externalLipNextPauseAt = 0;
         lipStartedAt = 0;
         setMouthOpen(0);
     }
 
     function setMouthOpen(value) {
+        mouthOpenValue = Math.max(0, Math.min(1, value || 0));
+        applyMouthOpen();
+    }
+
+    function applyMouthOpen() {
         if (!model || !model.internalModel || !model.internalModel.coreModel) return;
         var coreModel = model.internalModel.coreModel;
-        var v = Math.max(0, Math.min(1, value));
+        var v = mouthOpenValue;
         try {
             coreModel.setParameterValueById('PARAM_MOUTH_OPEN_Y', v);
         } catch (e1) {
@@ -587,6 +640,12 @@
                 coreModel.setParameterValueById('ParamMouthOpenY', v);
             } catch (e2) { }
         }
+    }
+
+    function bindMouthOpen(modelInstance) {
+        if (!modelInstance || !modelInstance.internalModel || mouthBoundModel === modelInstance) return;
+        mouthBoundModel = modelInstance;
+        modelInstance.internalModel.on('beforeModelUpdate', applyMouthOpen);
     }
 
     function loadSubtitleText(name, type, variant) {
@@ -754,7 +813,8 @@
             'FlickUp@Head': '头部上弹',
             'Flick@Body': '身体轻弹',
             'FlickDown@Body': '身体下弹',
-            'Tap@Head': '头部轻点'
+            'Tap@Head': '头部轻点',
+            'Tap@Body': '身体轻点'
         };
 
         var motionCounts = currentModelConfig.motionCounts || {};
@@ -773,6 +833,24 @@
                 })(internalName, i);
             }
         }
+
+        var mouthOpenButton = document.createElement('button');
+        mouthOpenButton.textContent = '张嘴';
+        mouthOpenButton.addEventListener('click', function () {
+            stopLipSync();
+            setMouthOpen(1);
+            showStatus('口型：张嘴', 'activity');
+        });
+        motionContainer.appendChild(mouthOpenButton);
+
+        var mouthCloseButton = document.createElement('button');
+        mouthCloseButton.textContent = '闭嘴';
+        mouthCloseButton.addEventListener('click', function () {
+            stopLipSync();
+            setMouthOpen(0);
+            showStatus('口型：闭嘴', 'activity');
+        });
+        motionContainer.appendChild(mouthCloseButton);
     }
 
     function getInitialModelKey() {
@@ -900,6 +978,7 @@
             model = nextModel;
             app.stage.addChild(model);
             fitModel();
+            bindMouthOpen(model);
 
             try {
                 localStorage.setItem('avatarModel', currentModelKey);
@@ -961,7 +1040,7 @@
                 showStatus(msg.text, 'speech');
                 hideSubtitle();
             }
-            if (msg.external_audio) {
+            if (msg.external_audio || msg.text) {
                 stopLipSync();
                 startExternalLipSync();
             }
@@ -970,6 +1049,7 @@
 
         if (msg.type === 'speech_end') {
             statusMode = 'idle';
+            stopLipSync();
             hideSubtitle();
             scheduleIdle(800);
             return;
@@ -1100,7 +1180,6 @@
                 resolution: window.devicePixelRatio || 1,
                 autoDensity: true
             });
-
             window.addEventListener('resize', resize);
 
             fetch('/tts-manifest')
@@ -1148,6 +1227,12 @@
     window.setExpression = setExpression;
     window.playMotion = playMotion;
     window.switchModel = requestSwitchModel;
+    window.__avatarDebug = {
+        setMouthOpen: setMouthOpen,
+        startExternalLipSync: startExternalLipSync,
+        stopLipSync: stopLipSync,
+        getMouthOpen: function () { return mouthOpenValue; }
+    };
 
     init();
 })();
