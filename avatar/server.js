@@ -21,10 +21,10 @@ const VENV_PYTHON = path.join(ROOT_DIR, '.venv', 'Scripts', 'python.exe');
 const PYTHON_BIN = fs.existsSync(VENV_PYTHON) ? VENV_PYTHON : 'python';
 const TTS_VOICE_BY_MODEL = {
     epsilon: 'zh-CN-XiaoxiaoNeural',
-    chitose: 'zh-CN-YunxiNeural',
+    chitose: 'zh-TW-YunJheNeural',
     haruGreeter: 'zh-CN-XiaoxiaoNeural',
-    haru: 'zh-CN-XiaoxiaoNeural',
-    natori: 'zh-CN-YunjianNeural'
+    haru: 'zh-CN-XiaoyiNeural',
+    natori: 'zh-TW-YunJheNeural'
 };
 const TTS_VOICES = Array.from(new Set(Object.values(TTS_VOICE_BY_MODEL)));
 const TTS_PREWARM_CONCURRENCY = Math.max(1, Number(process.env.TTS_PREWARM_CONCURRENCY) || 2);

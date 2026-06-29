@@ -69,7 +69,7 @@
         chitose: {
             label: 'Chitose 男',
             path: 'models/chitose_ja/runtime/chitose.model3.json',
-            voice: 'zh-CN-YunxiNeural',
+            voice: 'zh-TW-YunJheNeural',
             fit: { width: 1150, height: 1900, scale: 0.86, y: 0.54 },
             expressions: {
                 Angry: 'Angry.exp3.json',
@@ -98,14 +98,36 @@
             }
         },
         haruGreeter: {
-            label: 'Haru 接待',
+            label: 'Haru',
             path: 'models/haru_greeter_ja/runtime/haru_greeter_t05.model3.json',
-            voice: 'zh-CN-XiaoyiNeural',
+            voice: 'zh-CN-XiaoxiaoNeural',
             fit: { width: 1200, height: 1900, scale: 0.52, y: 0.62 },
             expressions: {},
             expressionButtons: [],
             motionCounts: {
                 '': 27
+            },
+            motionIndexLabels: {
+                '': {
+                    5: '震惊',
+                    7: '害羞',
+                    8: '害羞',
+                    10: '害羞',
+                    12: '害羞',
+                    13: '震惊',
+                    14: '震惊',
+                    16: '害羞',
+                    17: '害羞',
+                    18: '害羞',
+                    19: '害羞',
+                    20: '失落',
+                    21: '开心',
+                    22: '开心',
+                    23: '搞怪',
+                    24: '失落',
+                    25: '震惊',
+                    26: '震惊'
+                }
             },
             motionMap: {
                 Idle: [['', 0]],
@@ -120,7 +142,7 @@
         haru: {
             label: 'Hiyori',
             path: 'models/hiyori_zh-Hans/runtime/hiyori_pro_t11.model3.json',
-            voice: 'zh-CN-XiaoxiaoNeural',
+            voice: 'zh-CN-XiaoyiNeural',
             fit: { width: 1200, height: 2100, scale: 0.5, y: 0.55 },
             expressions: {},
             expressionButtons: [],
@@ -340,6 +362,70 @@
                 expressionPool: 'all',
                 motionPool: 'visible'
             }
+        },
+        haruGreeter: {
+            greet: {
+                motions: [['', 21], ['', 22]]
+            },
+            check_in: {
+                motions: [['', 21], ['', 22]]
+            },
+            first_time: {
+                motions: [['', 21], ['', 22]]
+            },
+            returning: {
+                motions: [['', 21], ['', 22]]
+            },
+            check_out: {
+                motions: [['', 21], ['', 22]]
+            },
+            stranger: {
+                motions: [['', 5], ['', 13], ['', 14], ['', 25], ['', 26]]
+            },
+            repeat: {
+                motions: [['', 7], ['', 8], ['', 10], ['', 12], ['', 16], ['', 17], ['', 18], ['', 19], ['', 5], ['', 13], ['', 14], ['', 20], ['', 23], ['', 24], ['', 25], ['', 26]]
+            },
+            attention: {
+                motions: [['', 7], ['', 8], ['', 10], ['', 12], ['', 16], ['', 17], ['', 18], ['', 19], ['', 21], ['', 22]]
+            },
+            idle_long: {
+                motions: [['', 3], ['', 4], ['', 20], ['', 24]]
+            },
+            crowd: {
+                motions: [['', 5], ['', 13], ['', 14], ['', 25], ['', 26]]
+            }
+        },
+        haru: {
+            greet: {
+                motions: [['Tap', 0], ['Tap', 1], ['Flick', 0]]
+            },
+            check_in: {
+                motions: [['Tap', 0], ['Tap', 1], ['Flick', 0]]
+            },
+            first_time: {
+                motions: [['Tap', 0], ['Tap', 1], ['Flick', 0]]
+            },
+            returning: {
+                motions: [['Tap', 0], ['Tap', 1], ['Flick', 0]]
+            },
+            check_out: {
+                motions: [['Tap', 0], ['Tap', 1], ['Flick', 0]]
+            },
+            stranger: {
+                motions: [['Tap', 0], ['Tap', 1], ['Flick', 0]]
+            },
+            repeat: {
+                motionPool: 'visible'
+            },
+            attention: {
+                motionPool: 'visible'
+            },
+            idle_long: {
+                motionPool: 'visible'
+            },
+            crowd: {
+                motionPool: 'visible'
+            }
         }
     };
 
@@ -373,7 +459,13 @@
         if (!model) return;
         var motion = resolveMotion(group, index);
         try {
-            await model.motion(motion[0], motion[1]);
+            var priority = PIXI.live2d.MotionPriority
+                ? PIXI.live2d.MotionPriority.FORCE
+                : 3;
+            var started = await model.motion(motion[0], motion[1], priority);
+            if (!started) {
+                console.warn('Motion rejected:', motion[0], motion[1]);
+            }
         } catch (e) {
             console.error('Motion error:', motion[0], motion[1], e);
         }
@@ -926,7 +1018,8 @@
             var count = motionCounts[internalName] || 1;
             for (var i = 0; i < count; i++) {
                 (function (name, index) {
-                    var motionLabel = motionLabels[name] || name || '动作';
+                    var indexLabels = (currentModelConfig.motionIndexLabels && currentModelConfig.motionIndexLabels[name]) || {};
+                    var motionLabel = indexLabels[index] || motionLabels[name] || name || '动作';
                     var button = document.createElement('button');
                     button.textContent = motionLabel + (count > 1 ? '[' + index + ']' : '');
                     button.addEventListener('click', function () {

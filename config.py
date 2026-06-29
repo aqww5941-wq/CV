@@ -193,9 +193,9 @@ AVATAR_SERVER_URL = os.getenv("AVATAR_SERVER_URL", "http://localhost:3456")
 TTS_VOICE = os.getenv("TTS_VOICE", "zh-CN-XiaoxiaoNeural")
 TTS_VOICE_BY_MODEL = {
     "epsilon": os.getenv("TTS_VOICE_EPSILON", "zh-CN-XiaoyiNeural"),
-    "chitose": os.getenv("TTS_VOICE_CHITOSE", "zh-CN-YunxiNeural"),
-    "haruGreeter": os.getenv("TTS_VOICE_HARU_GREETER", "zh-CN-XiaoyiNeural"),
-    "haru": os.getenv("TTS_VOICE_HARU", "zh-CN-XiaoxiaoNeural"),
+    "chitose": os.getenv("TTS_VOICE_CHITOSE", "zh-TW-YunJheNeural"),
+    "haruGreeter": os.getenv("TTS_VOICE_HARU_GREETER", "zh-CN-XiaoxiaoNeural"),
+    "haru": os.getenv("TTS_VOICE_HARU", "zh-CN-XiaoyiNeural"),
     "natori": os.getenv("TTS_VOICE_NATORI", "zh-TW-YunJheNeural"),
 }
 TTS_CACHE_DIR = os.path.join(CACHE_DIR, "tts")
