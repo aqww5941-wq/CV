@@ -8,7 +8,6 @@ import os
 import random
 import re
 import sys
-import time
 import urllib.error
 import urllib.request
 from datetime import date, datetime, timedelta
