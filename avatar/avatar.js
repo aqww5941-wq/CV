@@ -760,13 +760,23 @@
         if (!model || !model.internalModel || !model.internalModel.coreModel) return;
         var coreModel = model.internalModel.coreModel;
         var v = mouthOpenValue;
+        var ids = [];
         try {
-            coreModel.setParameterValueById('PARAM_MOUTH_OPEN_Y', v);
-        } catch (e1) {
+            var settings = model.internalModel.settings;
+            if (settings && typeof settings.getLipSyncParameters === 'function') {
+                ids = settings.getLipSyncParameters() || [];
+            }
+        } catch (e0) { }
+
+        ['PARAM_MOUTH_OPEN_Y', 'ParamMouthOpenY'].forEach(function (id) {
+            if (ids.indexOf(id) < 0) ids.push(id);
+        });
+
+        ids.forEach(function (id) {
             try {
-                coreModel.setParameterValueById('ParamMouthOpenY', v);
-            } catch (e2) { }
-        }
+                coreModel.setParameterValueById(id, v);
+            } catch (e) { }
+        });
     }
 
     function bindMouthOpen(modelInstance) {
