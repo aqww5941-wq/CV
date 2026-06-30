@@ -4,6 +4,7 @@ const WebSocket = require('ws');
 const path = require('path');
 const { execFile } = require('child_process');
 const fs = require('fs');
+const crypto = require('crypto');
 
 const app = express();
 const server = http.createServer(app);
@@ -28,7 +29,9 @@ const TTS_VOICE_BY_MODEL = {
 };
 const TTS_VOICES = Array.from(new Set(Object.values(TTS_VOICE_BY_MODEL)));
 const TTS_PREWARM_CONCURRENCY = Math.max(1, Number(process.env.TTS_PREWARM_CONCURRENCY) || 2);
-const EMPLOYEE_SYNC_TOKEN = process.env.EMPLOYEE_SYNC_TOKEN || '';
+const API_KEY = process.env.API_KEY || '';
+const API_SECRET = process.env.API_SECRET || '';
+const API_SIGNATURE_TOLERANCE_SECONDS = Math.max(1, Number(process.env.API_SIGNATURE_TOLERANCE_SECONDS) || 300);
 const NAMED_TTS_TYPES = ['check_in', 'check_out', 'repeat', 'first_time', 'returning'];
 const ANONYMOUS_TTS_TYPES = ['stranger', 'idle_long', 'crowd'];
 const prewarmStatus = {
@@ -45,7 +48,11 @@ const avatarReadyStatus = {
     at: ''
 };
 
-app.use(express.json());
+app.use(express.json({
+    verify: (req, res, buf) => {
+        req.rawBody = Buffer.from(buf);
+    }
+}));
 
 app.use('/models', express.static(path.join(STATIC_DIR, 'models')));
 app.use('/lib', express.static(path.join(STATIC_DIR, 'lib')));
@@ -196,9 +203,26 @@ function getTtsCacheFile(name, type, variant, voice = '') {
 }
 
 function isEmployeeSyncAuthorized(req) {
-    if (!EMPLOYEE_SYNC_TOKEN) return true;
-    const token = req.get('x-api-key') || String(req.get('authorization') || '').replace(/^Bearer\s+/i, '');
-    return token === EMPLOYEE_SYNC_TOKEN;
+    if (!API_KEY || !API_SECRET) return true;
+    const apiKey = req.get('x-api-key') || '';
+    const timestamp = req.get('x-timestamp') || '';
+    const signature = req.get('x-signature') || '';
+    if (apiKey !== API_KEY || !timestamp || !signature) return false;
+
+    const timestampSeconds = Number(timestamp);
+    if (!Number.isFinite(timestampSeconds)) return false;
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    if (Math.abs(nowSeconds - timestampSeconds) > API_SIGNATURE_TOLERANCE_SECONDS) return false;
+
+    const body = req.rawBody || Buffer.alloc(0);
+    const prefix = Buffer.from(`${req.method.toUpperCase()}\n${req.path}\n${timestamp}\n`, 'utf8');
+    const payload = Buffer.concat([prefix, body]);
+    const expected = crypto
+        .createHmac('sha256', API_SECRET)
+        .update(payload)
+        .digest('hex');
+    if (signature.length !== expected.length) return false;
+    return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
 }
 
 function normalizeEmployeeNames(body) {

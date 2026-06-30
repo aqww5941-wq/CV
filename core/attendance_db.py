@@ -217,13 +217,7 @@ class AttendanceDB:
     def register_employee(self, name: str) -> bool:
         with self._connection() as conn:
             cur = conn.cursor()
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS employees (
-                    id          INT AUTO_INCREMENT PRIMARY KEY,
-                    name        VARCHAR(255) NOT NULL UNIQUE,
-                    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            """)
+            self._ensure_employees_table(cur)
             cur.execute(
                 "INSERT IGNORE INTO employees (name) VALUES (%s)",
                 (name,),
@@ -235,14 +229,36 @@ class AttendanceDB:
     def list_employees(self) -> list[str]:
         with self._connection() as conn:
             cur = conn.cursor()
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS employees (
-                    id          INT AUTO_INCREMENT PRIMARY KEY,
-                    name        VARCHAR(255) NOT NULL UNIQUE,
-                    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            """)
+            self._ensure_employees_table(cur)
             cur.execute("SELECT name FROM employees ORDER BY id")
             names = [row[0] for row in cur.fetchall()]
             cur.close()
             return names
+
+    def employee_exists(self, name: str) -> bool:
+        with self._connection() as conn:
+            cur = conn.cursor()
+            self._ensure_employees_table(cur)
+            cur.execute("SELECT 1 FROM employees WHERE name=%s LIMIT 1", (name,))
+            exists = cur.fetchone() is not None
+            cur.close()
+            return exists
+
+    def delete_employee(self, name: str) -> bool:
+        with self._connection() as conn:
+            cur = conn.cursor()
+            self._ensure_employees_table(cur)
+            cur.execute("DELETE FROM employees WHERE name=%s", (name,))
+            deleted = cur.rowcount > 0
+            cur.close()
+            return deleted
+
+    @staticmethod
+    def _ensure_employees_table(cur) -> None:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS employees (
+                id          INT AUTO_INCREMENT PRIMARY KEY,
+                name        VARCHAR(255) NOT NULL UNIQUE,
+                created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """)

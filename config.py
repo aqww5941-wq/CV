@@ -183,6 +183,21 @@ REDIS_DB = _get_int("REDIS_DB", 0)
 REDIS_POOL_SIZE = _get_int("REDIS_POOL_SIZE", 10)
 REDIS_POOL_MAX_OVERFLOW = _get_int("REDIS_POOL_MAX_OVERFLOW", 5)
 
+# ── FastAPI 公司系统对接接口 ──
+API_HOST = os.getenv("API_HOST", "0.0.0.0")
+API_PORT = _get_int("API_PORT", 8000)
+API_KEY = os.getenv("API_KEY", "")
+API_SECRET = os.getenv("API_SECRET", "")
+API_SIGNATURE_TOLERANCE_SECONDS = _get_int("API_SIGNATURE_TOLERANCE_SECONDS", 300)
+API_CORS_ORIGINS = [
+    item.strip()
+    for item in os.getenv("API_CORS_ORIGINS", "*").split(",")
+    if item.strip()
+]
+API_CAPTURE_CAMERA_INDEX = _get_int("API_CAPTURE_CAMERA_INDEX", CAMERA_INDEX)
+API_CAPTURE_WARMUP_FRAMES = _get_int("API_CAPTURE_WARMUP_FRAMES", 8)
+API_UPLOAD_DIR = os.getenv("API_UPLOAD_DIR") or os.path.join(CACHE_DIR, "api_uploads")
+
 # ── 消息队列配置 (事件发布) ──
 MQ_TOPIC_PREFIX = os.getenv("MQ_TOPIC_PREFIX", "attendance")
 

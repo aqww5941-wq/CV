@@ -10,10 +10,13 @@ from core.vector_db import VectorDB
 
 import logging
 import os
+import hashlib
+import hmac
 import json
 import shutil
 import sys
 import time
+from urllib.parse import urlparse
 import urllib.error
 import urllib.request
 
@@ -46,7 +49,8 @@ TOTAL_PHOTOS = len(ANGLES) * PHOTOS_PER_ANGLE
 DETECT_EVERY_N = 5
 ANGLE_READY_SECONDS = 2.0
 AUTO_CAPTURE_INTERVAL_SECONDS = 0.8
-EMPLOYEE_SYNC_TOKEN = os.environ.get("EMPLOYEE_SYNC_TOKEN", "")
+API_KEY = os.environ.get("API_KEY", "")
+API_SECRET = os.environ.get("API_SECRET", "")
 ENABLE_TTS_PREWARM = os.environ.get("ENABLE_TTS_PREWARM") == "1"
 
 _FONT_PATH = None
@@ -116,8 +120,7 @@ def prewarm_employee_voice(name: str) -> dict:
     url = f"{AVATAR_SERVER_URL}/employees/sync"
     payload = json.dumps({"name": name}, ensure_ascii=False).encode("utf-8")
     headers = {"Content-Type": "application/json"}
-    if EMPLOYEE_SYNC_TOKEN:
-        headers["x-api-key"] = EMPLOYEE_SYNC_TOKEN
+    headers.update(_signed_headers("POST", url, payload))
     req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=180) as resp:
@@ -131,6 +134,24 @@ def prewarm_employee_voice(name: str) -> dict:
     if not data.get("ok"):
         raise RuntimeError(f"语音生成失败: {data}")
     return data
+
+
+def _signed_headers(method: str, url: str, body: bytes) -> dict[str, str]:
+    if not API_KEY or not API_SECRET:
+        return {}
+    timestamp = str(int(time.time()))
+    path = urlparse(url).path
+    signing_payload = f"{method.upper()}\n{path}\n{timestamp}\n".encode("utf-8") + body
+    signature = hmac.new(
+        API_SECRET.encode("utf-8"),
+        signing_payload,
+        hashlib.sha256,
+    ).hexdigest()
+    return {
+        "x-api-key": API_KEY,
+        "x-timestamp": timestamp,
+        "x-signature": signature,
+    }
 
 
 def delete_captured_photos(save_dir: str) -> None:
