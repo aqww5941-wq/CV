@@ -16,6 +16,7 @@ avatar/cache/
 
 # 模型源文件 (已复制到 avatar/models/)
 epsilon_ja/
+avatar/models/
 
 # Node.js
 avatar/node_modules/
@@ -33,6 +34,11 @@ Desktop.ini
 .trae/
 .vscode/
 .idea/
+
+# Python 工具缓存
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
 
 # 环境变量 & 密钥
 .env
