@@ -14,9 +14,8 @@ cache/
 employees/
 avatar/cache/
 
-# 模型源文件 (已复制到 avatar/models/)
-epsilon_ja/
-avatar/models/
+# 模型源文件 
+# avatar/models/
 
 # Node.js
 avatar/node_modules/
